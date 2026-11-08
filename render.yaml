@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: lens-calibration-api
+    env: docker
+    plan: free
+    autoDeploy: true
