@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.ipynb  # ไม่จำเป็นต้องเอาไฟล์ Notebook เข้าไปบนเซิร์ฟเวอร์
+venv/
+env/
+.env
