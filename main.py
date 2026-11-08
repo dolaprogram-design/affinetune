@@ -1,130 +1,78 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import cv2
-import rawpy
 import numpy as np
-import exiftool
-import os
-import shutil
+from PIL import Image
+import piexif
+import io
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="Lens Focus Analysis API", description="API สำหรับวิเคราะห์ความคมชัดของภาพและอ่านค่า EXIF")
 
 @app.get("/")
 def read_root():
-    return {"status": "Pro Lens Calibration API on Render is running!"}
+    return {"message": "Welcome to Lens Focus Analysis API. Use POST /analyze to upload an image."}
 
 @app.post("/analyze")
 async def analyze_image(file: UploadFile = File(...)):
-    temp_filename = f"temp_{file.filename}"
-    with open(temp_filename, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image.")
 
     try:
-        af_x_coord, af_y_coord = None, None
-        afma_value = None
-        lens_model = "Unknown"
-        focal_length = "Unknown"
-        camera_model = "Unknown"
-        aperture = "Unknown"
-        shutter = "Unknown"
-        iso = "Unknown"
+        # อ่านข้อมูลไฟล์
+        contents = await file.read()
 
-        with exiftool.ExifToolHelper() as et:
-            metadata = et.get_metadata(temp_filename)[0]
-
-            for key, value in metadata.items():
-                k_lower = key.lower()
-                
-                # 1. ค้นหาพิกัดจุดโฟกัส
-                if "afareaxposition" in k_lower or "afpointpositionx" in k_lower:
-                    af_x_coord = int(value)
-                if "afareayposition" in k_lower or "afpointpositiony" in k_lower:
-                    af_y_coord = int(value)
-                
-                # 2. ค้นหาค่า AF Fine Tune (ครอบคลุมทุกค่าย)
-                if any(x in k_lower for x in ["affinetune", "afmicroadj", "aftuning"]):
-                    try:
-                        afma_value = float(value)
-                    except:
-                        pass
-                
-                # 3. ค้นหาข้อมูลเลนส์และรุ่นกล้อง
-                if "lensmodel" in k_lower or "lenstype" in k_lower:
-                    lens_model = str(value)
-                if "model" in k_lower and "camera" not in k_lower and camera_model == "Unknown":
-                    camera_model = str(value)
-                if "focallength" in k_lower and "35mm" not in k_lower:
-                    focal_length = str(value)
-                if "fnumber" in k_lower or "aperture" in k_lower:
-                    aperture = str(value)
-                if "exposuretime" in k_lower or "shutterspeed" in k_lower:
-                    shutter = str(value)
-                if "iso" in k_lower:
-                    iso = str(value)
-
-        # จัดรูปแบบข้อความเลนส์และทางยาวโฟกัส
-        if focal_length != "Unknown" and not focal_length.endswith("mm"):
-            focal_length += " mm"
-
-        is_raw = temp_filename.lower().endswith(('.nef', '.cr2', '.arw', '.cr3', '.dng'))
+        # 1. การอ่านค่า EXIF ด้วย Pillow และ piexif
+        image_pil = Image.open(io.BytesIO(contents))
+        exif_dict = {"Exif": {}}
+        extracted_exif = {}
         
-        if is_raw:
-            with rawpy.imread(temp_filename) as raw:
-                rgb_image = raw.postprocess(half_size=True) 
-            gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
-        else:
-            img = cv2.imread(temp_filename)
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-        h, w = gray.shape
-        scaling_factor = 2 if is_raw else 1
+        try:
+            if "exif" in image_pil.info:
+                exif_dict = piexif.load(image_pil.info["exif"])
+                
+                # ดึงข้อมูล EXIF พื้นฐานที่สำคัญ (ต้องแปลงค่าจาก Rational/Tuple เป็นตัวเลข)
+                def format_rational(val):
+                    if isinstance(val, tuple) and len(val) == 2 and val[1] != 0:
+                        return val[0] / val[1]
+                    return val
 
-        if af_x_coord is not None and af_y_coord is not None:
-            center_x = af_x_coord // scaling_factor
-            center_y = af_y_coord // scaling_factor
-            focus_status = "Used AF Point Coordinates"
-        else:
-            center_x = w // 2
-            center_y = h // 2
-            focus_status = "Used Center Crop (AF Point not found)"
+                if "Exif" in exif_dict and exif_dict["Exif"]:
+                    exif_data = exif_dict["Exif"]
+                    
+                    # 33437: FNumber (รูรับแสง)
+                    if piexif.ExifIFD.FNumber in exif_data:
+                        extracted_exif["FNumber"] = format_rational(exif_data[piexif.ExifIFD.FNumber])
+                    
+                    # 37386: FocalLength (ระยะโฟกัส)
+                    if piexif.ExifIFD.FocalLength in exif_data:
+                        extracted_exif["FocalLength"] = format_rational(exif_data[piexif.ExifIFD.FocalLength])
+                        
+                    # 34855: ISOSpeedRatings
+                    if piexif.ExifIFD.ISOSpeedRatings in exif_data:
+                        extracted_exif["ISO"] = exif_data[piexif.ExifIFD.ISOSpeedRatings]
+                        
+        except Exception as e:
+            # หากไม่มี EXIF หรืออ่านไม่ได้ ให้ข้ามไป
+            extracted_exif["error"] = "Could not parse EXIF data"
 
-        box_size = 400
-        half_box = box_size // 2
-        start_x = max(0, center_x - half_box)
-        end_x = min(w, center_x + half_box)
-        start_y = max(0, center_y - half_box)
-        end_y = min(h, center_y + half_box)
+        # 2. การวิเคราะห์ความคมชัดด้วย OpenCV (Laplacian Variance)
+        # แปลง bytes กลับเป็น numpy array เพื่อให้ OpenCV อ่านได้
+        nparr = np.frombuffer(contents, np.uint8)
+        img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        roi = gray[start_y:end_y, start_x:end_x]
-        laplacian = cv2.Laplacian(roi, cv2.CV_64F)
-        sharpness_score = float(np.var(laplacian))
+        if img_cv is None:
+            raise ValueError("OpenCV cannot decode the image.")
 
-        result = {
+        # แปลงเป็น Grayscale แล้วหาค่า Variance ของ Laplacian (ค่ายิ่งสูงยิ่งคมชัด)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        sharpness_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+        # สร้างผลลัพธ์ JSON
+        return {
             "filename": file.filename,
-            "sharpness_score": round(sharpness_score, 2),
-            "afma_value": afma_value,
-            "lens_model": lens_model,
-            "camera_model": camera_model,
-            "focal_length": focal_length,
-            "aperture": aperture,
-            "shutter": shutter,
-            "iso": iso,
-            "focus_status": focus_status,
-            "af_coords": {"x": af_x_coord, "y": af_y_coord}
+            "sharpness_score": float(sharpness_score), # คะแนนความคมชัดสำหรับการปรับจูนเลนส์
+            "exif_data": extracted_exif
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
-
-    return result
