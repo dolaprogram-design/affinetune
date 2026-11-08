@@ -1,6 +1,7 @@
-gradio
+fastapi
+uvicorn
+rawpy
 opencv-python-headless
 numpy
-pandas
-matplotlib
-Pillow
+pyexiftool
+python-multipart
