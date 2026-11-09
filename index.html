@@ -12,20 +12,21 @@
         
         <header class="text-center mb-10">
             <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-2">📸 Pro Lens & Camera Analytics Dashboard</h1>
-            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์คุณภาพภาพถ่ายและเปรียบเทียบพารามิเตอร์กล้องเชิงลึก พร้อมองค์ความรู้ทางวิชาการการถ่ายภาพ</p>
+            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์คุณภาพภาพถ่าย เปรียบเทียบพารามิเตอร์ และเครื่องมือปรับจูน AF Fine-tune เชิงลึก</p>
         </header>
 
-        <!-- Tab Navigation Menu -->
-        <div class="flex justify-center space-x-4 mb-8">
-            <button onclick="switchTab('uploadTab')" id="btnUploadTab" class="px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition">1. รายงานและภาพขนาดย่อ</button>
-            <button onclick="switchTab('analyticsTab')" id="btnAnalyticsTab" class="px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition">2. กราฟวิเคราะห์และความเห็นเชิงวิชาการ</button>
+        <!-- Tab Navigation Menu (3 เมนูหลัก) -->
+        <div class="flex flex-wrap justify-center gap-2 mb-8">
+            <button onclick="switchTab('uploadTab')" id="btnUploadTab" class="px-5 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition">1. รายงานและภาพขนาดย่อ</button>
+            <button onclick="switchTab('analyticsTab')" id="btnAnalyticsTab" class="px-5 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition">2. กราฟและความเห็นเชิงวิชาการ</button>
+            <button onclick="switchTab('calibrationTab')" id="btnCalibrationTab" class="px-5 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition">3. คู่มือและระบบปรับจูน AF Fine-tune</button>
         </div>
 
         <!-- TAB 1: อัปโหลดและจัดการรายการไฟล์ -->
         <section id="uploadTab" class="space-y-6">
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <h2 class="text-lg font-bold text-slate-700 mb-2">📁 เลือกไฟล์ภาพ (เลือกสะสมจากหลายโฟลเดอร์ได้อิสระ)</h2>
-                <p class="text-xs text-slate-400 mb-4">รองรับไฟล์ .NEF, .CR2, .ARW, .JPG, .PNG (ระบบจัดสรรขนาดไฟล์อัตโนมัติ ป้องกันแรมเซิร์ฟเวอร์เต็ม)</p>
+                <p class="text-xs text-slate-400 mb-4">รองรับไฟล์ .NEF, .CR2, .ARW, .JPG, .PNG (ระบบจัดสรรขนาดภาพอัตโนมัติเพื่อป้องกันแรมเซิร์ฟเวอร์ 512MB เต็ม)</p>
                 
                 <div class="flex flex-col md:flex-row items-center gap-4">
                     <input type="file" id="filesInput" multiple accept="image/*,.nef,.cr2,.arw,.raw,.dng" 
@@ -41,7 +42,7 @@
                 <div class="flex justify-between items-center mb-4">
                     <div>
                         <h3 class="font-bold text-slate-700">📋 รายการไฟล์รอดำเนินการ (<span id="fileCount">0</span> ไฟล์)</h3>
-                        <p id="memoryNotice" class="text-xs text-indigo-600 mt-0.5">ระบบปลอดภัย: ประมวลผลเรียงลำดับตามคิวเพื่อรักษาหน่วยความจำเซิร์ฟเวอร์</p>
+                        <p id="memoryNotice" class="text-xs text-indigo-600 mt-0.5">ระบบปลอดภัย: เรียงลำดับตามขนาดและประมวลผลทีละไฟล์เพื่อป้องกันเซิร์ฟเวอร์สะดุด</p>
                     </div>
                     <button onclick="startSmartBatchAnalysis()" id="analyzeBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl transition shadow-sm text-sm disabled:bg-slate-300 disabled:cursor-not-allowed" disabled>
                         🚀 เริ่มวิเคราะห์ภาพทั้งหมดทีเดียว
@@ -66,8 +67,8 @@
                                 <tr class="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
                                     <th class="p-4 w-1/4">ภาพขนาดย่อ & ชื่อไฟล์</th>
                                     <th class="p-4 w-1/4">การตั้งค่ากล้อง (EXIF)</th>
-                                    <th class="p-4 w-1/3">ความคมชัด & คำวินิจฉัย</th>
-                                    <th class="p-4 w-1/6 text-center">พิกัดจุดโฟกัส</th>
+                                    <th class="p-4 w-1/3">ความคมชัด & พิกัดจุดโฟกัส</th>
+                                    <th class="p-4 w-1/6 text-center">ตรวจสอบพิกัด</th>
                                 </tr>
                             </thead>
                             <tbody id="reportTableBody" class="divide-y divide-slate-200 text-sm">
@@ -76,7 +77,7 @@
                     </div>
                 </div>
 
-                <!-- ส่วนเพิ่มเติม: คำอธิบายและข้อเสนอแนะเชิงวิชาการท้ายตาราง -->
+                <!-- ส่วนสรุปข้อเสนอแนะเชิงวิชาการท้ายตาราง -->
                 <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-6 rounded-2xl shadow-md space-y-4">
                     <h3 class="text-base font-bold text-indigo-300 flex items-center gap-2">
                         <span>💡</span> สรุปข้อเสนอแนะและข้อสังเกตเชิงวิชาการท้ายรายงาน
@@ -94,41 +95,71 @@
                 <h2 class="text-lg font-bold text-slate-700">📈 กราฟเปรียบเทียบปัจจัยการตั้งค่ากล้องกับความคมชัด พร้อมคำอธิบายเชิงวิชาการ</h2>
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <!-- กราฟที่ 1: ISO -->
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">1. ความไวแสง (ISO) vs ความคมชัด</h3>
                         <canvas id="chartISO"></canvas>
                         <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
-                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ค่า ISO สูงเกินไปจะทำให้เกิดสัญญาณรบกวน (Noise) และลด Dynamic Range ซึ่งอัลกอริทึม Laplacian จะอ่าน Noise เหล่านี้เป็นขอบภาพเทียมหรือลดทอนความเนียน ทำให้คะแนนความคมชัดดรอปลง ควรใช้ ISO ต่ำที่สุดเท่าที่สภาพแสงเอื้ออำนวย
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ค่า ISO สูงเกินไปจะเกิด Noise ซึ่งอัลกอริทึมความคมชัดอาจอ่านเป็นความคมเทียมหรือบั่นทอนความเนียน ควรใช้ ISO ต่ำที่สุดเท่าที่ทำได้
                         </p>
                     </div>
-
-                    <!-- กราฟที่ 2: Focal Length -->
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">2. ทางยาวโฟกัส (Focal Length) vs ความคมชัด</h3>
                         <canvas id="chartFocal"></canvas>
                         <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
-                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> เลนส์ซูมส่วนใหญ่จะมีช่วง "Sweet Spot" ที่ให้ความคมชัดสูงที่สุด (มักจะอยู่ช่วงกลางๆ ของช่วงซูม) การซูมสุดช่วง (Telephoto/Wide สุดขีด) มักมีความคมชัดลดลงเล็กน้อยที่ขอบและกลางภาพ
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> เลนส์ซูมส่วนใหญ่มีช่วง Sweet Spot ที่คมที่สุดช่วงกลางๆ การซูมสุดขีดมักมีความคมชัดลดลงเล็กน้อย
                         </p>
                     </div>
-
-                    <!-- กราฟที่ 3: Shutter Speed -->
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">3. ความเร็วชัตเตอร์ (Shutter Speed) vs ความคมชัด</h3>
                         <canvas id="chartShutter"></canvas>
                         <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
-                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ชัตเตอร์สปีดที่ช้าเกินไปจะเกิดอาการมือสั่น (Camera Shake) ตามกฎ Reciprocal Rule ความเร็วชัตเตอร์ขั้นต่ำควรเป็น 1 / ทางยาวโฟกัส (เช่น ใช้เลนส์ 50mm ชัตเตอร์ไม่ควรต่ำกว่า 1/50 วินาที เว้นแต่มีระบบกันสั่น)
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ชัตเตอร์ช้าเกินไปทำให้เกิด Camera Shake ตามกฎ Reciprocal Rule ความเร็วชัตเตอร์ควรสัมพันธ์กับทางยาวโฟกัส
                         </p>
                     </div>
-
-                    <!-- กราฟที่ 4: F-Number -->
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">4. รูรับแสง (F-Number) vs ความคมชัด</h3>
                         <canvas id="chartFNumber"></canvas>
                         <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
-                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> การเปิดรูรับแสงกว้างสุด (เช่น f/1.4 - f/2.8) มักทำให้ภาพมีความคมชัดลดลงเล็กน้อยและเกิดอาการ Vignetting การหรี่รูรับแสงมาที่ช่วง f/4 - f/8 จะเป็นจุดที่คมชัดที่สุด (Sweet Spot ของเลนส์) แต่หากแคบเกินไป (เช่น f/22) จะเกิดการหักเหของแสง (Diffraction) ทำให้ภาพเบลอลงได้
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> เปิดกว้างสุดมักมีความซอฟต์ การหรี่มาที่ f/4 - f/8 มักเป็นจุดที่คมที่สุด แต่ถ้าแคบเกินไปจะเกิดการหักเหแสง (Diffraction)
                         </p>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: คู่มือและระบบปรับจูน AF Fine-tune -->
+        <section id="calibrationTab" class="hidden space-y-6">
+            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                <div class="border-b pb-4">
+                    <h2 class="text-xl font-bold text-slate-800">🛠️ คู่มือและขั้นตอนการทำ AF Fine-tune กล้องและเลนส์</h2>
+                    <p class="text-xs text-slate-500 mt-1">กระบวนการทางเทคนิคเพื่อแก้ปัญหาอาการหน้าชัดหลังเบลอ (Front/Back Focus) อย่างเป็นระบบ</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-slate-50 p-5 rounded-xl border border-slate-100 space-y-2">
+                        <div class="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center font-bold text-sm">1</div>
+                        <h3 class="font-bold text-slate-800 text-sm">เตรียมอุปกรณ์และสภาวะแสง</h3>
+                        <p class="text-xs text-slate-600 leading-relaxed">ติดตั้งกล้องบนขาตั้งกล้องที่มั่นคง ใช้สายลั่นชัตเตอร์หรือตั้งเวลาถ่าย เล็งไปที่แผ่นทดสอบ (Focus Chart) ในมุมตั้งฉาก 90 องศา และมีแสงสว่างเพียงพอเพื่อลด Noise</p>
+                    </div>
+                    <div class="bg-slate-50 p-5 rounded-xl border border-slate-100 space-y-2">
+                        <div class="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center font-bold text-sm">2</div>
+                        <h3 class="font-bold text-slate-800 text-sm">ถ่ายภาพไล่ระดับ Micro-adjustment</h3>
+                        <p class="text-xs text-slate-600 leading-relaxed">เข้าไปตั้งค่าในกล้อง (AF Fine-tune / AF Microadjustment) โดยถ่ายภาพทดสอบไล่ตั้งแต่ค่าติดลบ เช่น <span class="font-bold text-rose-600">-20</span> ผ่าน <span class="font-bold text-slate-700">0</span> ไปจนถึงค่าบวก <span class="font-bold text-emerald-600">+20</span> (ปรับทีละสเต็ป)</p>
+                    </div>
+                    <div class="bg-slate-50 p-5 rounded-xl border border-slate-100 space-y-2">
+                        <div class="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center font-bold text-sm">3</div>
+                        <h3 class="font-bold text-slate-800 text-sm">วิเคราะห์และบันทึกค่าที่เหมาะสม</h3>
+                        <p class="text-xs text-slate-600 leading-relaxed">นำภาพชุดดังกล่าวมาอัปโหลดเข้าสู่เมนูที่ 1 ของระบบนี้ ระบบจะประเมินคะแนนความคมชัดและแสดงค่า AF Fine-tune ที่ให้คะแนนสูงสุดเพื่อนำไปตั้งค่าถาวร</p>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 p-5 rounded-xl space-y-2 text-xs md:text-sm text-amber-900 leading-relaxed">
+                    <h4 class="font-bold text-amber-800 flex items-center gap-2 text-base">
+                        <span>⚠️</span> ข้อสังเกตเชิงวิชาการเกี่ยวกับพิกัดตารางเซ็นเซอร์ (Sensor Grid & AF Points)
+                    </h4>
+                    <p>
+                        กล้องถ่ายภาพจะบันทึกตำแหน่งจุดโฟกัสใน MakerNotes เป็นรูปแบบพิกัด (เช่น <span class="font-semibold">a7 b5</span> ซึ่งแทนพิกัดแนวแถวและคอลัมน์บนเซ็นเซอร์) หากภาพที่ให้คะแนนความคมชัดสูงสุดตรงกับจุดโฟกัสที่ผู้ใช้เลือก ยืนยันว่าระบบโฟกัสมีความแม่นยำสูง แต่หากจุดที่ชัดที่สุดเลื่อนหน้าหรือเลื่อนหลัง (Front/Back Focus) จำเป็นต้องใช้ค่าชดเชย Micro-adjustment เข้ามาช่วยปรับแก้ทางฮาร์ดแวร์ในตัวกล้อง
+                    </p>
                 </div>
             </div>
         </section>
@@ -143,8 +174,9 @@
                 <img id="modalImg" class="max-h-[60vh] object-contain rounded-lg" src="" alt="Annotated AF">
             </div>
             <div class="md:w-1/3 flex flex-col justify-center">
-                <h3 class="text-lg font-bold text-indigo-700 mb-2 border-b pb-2">คำอธิบายระบบโฟกัส</h3>
+                <h3 class="text-lg font-bold text-indigo-700 mb-2 border-b pb-2">คำอธิบายพิกัดจุดโฟกัส</h3>
                 <p id="modalAfPoint" class="text-sm font-semibold text-slate-800 mb-2"></p>
+                <p class="text-xs text-slate-500 mb-3 leading-relaxed">พิกัดตารางเซ็นเซอร์แสดงตำแหน่งจุดโฟกัสยืนยัน (Focus Confirmation)</p>
                 <p id="modalAdvice" class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg border border-emerald-100 leading-relaxed"></p>
             </div>
         </div>
@@ -162,6 +194,7 @@
                     accumulatedFiles.push(file);
                 }
             });
+            // จัดเรียงขนาดไฟล์จากเล็กไปใหญ่เพื่อความปลอดภัยต่อหน่วยความจำเซิร์ฟเวอร์
             accumulatedFiles.sort((a, b) => a.size - b.size);
             updateFilesListUI();
             filesInput.value = "";
@@ -207,20 +240,30 @@
         function switchTab(tabId) {
             const uploadTab = document.getElementById('uploadTab');
             const analyticsTab = document.getElementById('analyticsTab');
+            const calibrationTab = document.getElementById('calibrationTab');
+            
             const btnUpload = document.getElementById('btnUploadTab');
             const btnAnalytics = document.getElementById('btnAnalyticsTab');
+            const btnCalibration = document.getElementById('btnCalibrationTab');
+
+            uploadTab.classList.add('hidden');
+            analyticsTab.classList.add('hidden');
+            calibrationTab.classList.add('hidden');
+
+            btnUpload.className = "px-5 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
+            btnAnalytics.className = "px-5 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
+            btnCalibration.className = "px-5 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
 
             if (tabId === 'uploadTab') {
                 uploadTab.classList.remove('hidden');
-                analyticsTab.classList.add('hidden');
-                btnUpload.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
-                btnAnalytics.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
-            } else {
-                uploadTab.classList.add('hidden');
+                btnUpload.className = "px-5 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
+            } else if (tabId === 'analyticsTab') {
                 analyticsTab.classList.remove('hidden');
-                btnAnalytics.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
-                btnUpload.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
+                btnAnalytics.className = "px-5 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
                 renderAnalyticsCharts();
+            } else if (tabId === 'calibrationTab') {
+                calibrationTab.classList.remove('hidden');
+                btnCalibration.className = "px-5 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
             }
         }
 
@@ -251,6 +294,7 @@
                 tbody.appendChild(tr);
             }
 
+            // ส่งข้อมูลประมวลผลทีละไฟล์ตามลำดับ (Serial Processing ป้องกันแรมเซิร์ฟเวอร์เต็ม 512MB)
             for (let i = 0; i < accumulatedFiles.length; i++) {
                 const tr = document.getElementById(`row-${i}`);
                 tr.classList.add('bg-amber-50');
@@ -298,10 +342,10 @@
                                 <div class="text-xl font-black text-indigo-600">${item.sharpness}</div>
                                 <div class="text-xs font-bold">${item.quality}</div>
                                 <div class="text-[11px] text-slate-500">${item.advice}</div>
-                                <div class="text-xs text-purple-700 mt-1">AF Fine-tune: ${item.af_fine_tune}</div>
+                                <div class="text-xs text-purple-700 mt-1"><b>AF Fine-tune:</b> ${item.af_fine_tune}</div>
                             </td>
                             <td class="p-4 text-center">
-                                ${item.annotated_image ? `<button onclick="openModal('${item.annotated_image}', '${item.af_point}', '${item.advice}')" class="bg-slate-800 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-slate-700 shadow">🔍 ดูพิกัดจุดโฟกัส</button>` : '-'}
+                                ${item.annotated_image ? `<button onclick="openModal('${item.annotated_image}', '${item.af_point}', '${item.advice}')" class="bg-slate-800 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-slate-700 shadow">🔍 พิกัด ${item.af_point}</button>` : '-'}
                             </td>
                         `;
                     }
@@ -316,22 +360,20 @@
             document.getElementById('overallStatus').innerText = `✅ ประมวลผลเสร็จสิ้นเรียบร้อย`;
             updateTableSummaryAdvice();
             btn.disabled = false;
-            btn.innerText = "🚀 เริ่มวิเคราะห์ตามลำดับความปลอดภัย";
+            btn.innerText = "🚀 เริ่มวิเคราะห์ภาพทั้งหมดทีเดียว";
         }
 
-        // อัปเดตข้อสังเกตและข้อเสนอแนะเชิงวิชาการท้ายตาราง
         function updateTableSummaryAdvice() {
             const valid = analyzedResults.filter(d => !d.error);
             if (valid.length === 0) return;
 
-            // หาภาพที่คมชัดที่สุดและต่ำที่สุด
             let best = valid.reduce((prev, curr) => (curr.sharpness > prev.sharpness) ? curr : prev);
             let worst = valid.reduce((prev, curr) => (curr.sharpness < prev.sharpness) ? curr : prev);
 
             let html = `
-                <p>• <b>ภาพที่ให้ความคมชัดสูงสุดในชุดนี้คือ:</b> <span class="text-emerald-400 font-bold">${best.filename}</span> (คะแนน ${best.sharpness}) ด้วยการตั้งค่า F-number: f/${best.f_number}, Shutter: ${best.exposure_time}s, ISO: ${best.iso} ซึ่งถือเป็นจุดสมดุลที่ดีที่สุด (Sweet Spot)</p>
-                <p>• <b>ข้อสังเกตการปรับจูน (AF Fine-tune):</b> ค่า Fine-tune ปัจจุบันอยู่ที่ <span class="text-indigo-300 font-bold">${best.af_fine_tune}</span> หากพบว่าภาพส่วนใหญ่มีอาการหลุดโฟกัสหน้า/หลัง แนะนำให้ใช้ข้อมูลเปรียบเทียบในแท็บกราฟเพื่อปรับจูนตัวเลขชดเชยเพิ่มเติม</p>
-                <p>• <b>คำแนะนำทางเทคนิค:</b> ภาพที่มีคะแนนต่ำกว่า 100 (${worst.filename}) ควรตรวจสอบความเร็วชัตเตอร์ว่าต่ำเกินไปจนเกิดความสั่นไหวหรือไม่</p>
+                <p>• <b>ภาพที่ให้ความคมชัดสูงสุดในชุดนี้คือ:</b> <span class="text-emerald-400 font-bold">${best.filename}</span> (คะแนนความคมชัด: ${best.sharpness}) บันทึกผ่านพิกัดจุดโฟกัสเซ็นเซอร์ <span class="text-indigo-300 font-semibold">${best.af_point}</span> ด้วยค่า F-number: f/${best.f_number}, Shutter: ${best.exposure_time}s, ISO: ${best.iso}</p>
+                <p>• <b>ผลการตรวจสอบระบบโฟกัส:</b> ภาพนี้ใช้ค่าปรับจูนเลนส์ <span class="text-indigo-300 font-bold">${best.af_fine_tune}</span> ซึ่งถือเป็นจุดสมดุลที่ดีที่สุดในชุดการทดสอบนี้</p>
+                <p>• <b>คำแนะนำเชิงปฏิบัติ:</b> ภาพที่มีคะแนนต่ำกว่า 100 (${worst.filename}) ควรนำไปตรวจสอบย้อนกลับในแท็บคู่มือ AF Fine-tune เพื่อพิจารณาปรับชดเชยค่าไมโครแอดจัสต์เพิ่มเติม</p>
             `;
             document.getElementById('tableSummaryAdvice').innerHTML = html;
         }
@@ -364,7 +406,7 @@
 
         function openModal(imgSrc, afPoint, advice) {
             document.getElementById('modalImg').src = imgSrc;
-            document.getElementById('modalAfPoint').innerText = `เซ็นเซอร์ยืนยันพิกัดโฟกัสที่: ${afPoint}`;
+            document.getElementById('modalAfPoint').innerText = `พิกัดตารางเซ็นเซอร์จุดโฟกัส: ${afPoint}`;
             document.getElementById('modalAdvice').innerText = advice;
             document.getElementById('imageModal').classList.remove('hidden');
         }
