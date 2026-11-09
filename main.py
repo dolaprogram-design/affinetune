@@ -29,6 +29,10 @@ def read_root():
 
 @app.post("/analyze-batch")
 async def analyze_batch(files: list[UploadFile] = File(...)):
+    # จำกัดไม่ให้เกิน 10 ไฟล์ต่อครั้งตามเงื่อนไข
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="สามารถอัปโหลดไฟล์พร้อมกันได้สูงสุดไม่เกิน 10 ไฟล์ครับ")
+
     results = []
     
     for file in files:
@@ -38,7 +42,7 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
             temp_path = temp.name
 
         try:
-            # 1. อ่าน Exif และ MakerNotes ด้วย ExifTool
+            # 1. ดึงข้อมูล Exif และ MakerNotes เชิงลึกด้วย ExifTool
             cmd = ['exiftool', '-j', temp_path]
             res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
             exif_data = {}
@@ -53,14 +57,14 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
             focal_length = exif_data.get('FocalLength', 'N/A')
             af_fine_tune = exif_data.get('AFFineTuneAdj', exif_data.get('AFMicroAdj', 'N/A'))
             af_status = exif_data.get('AFFineTune', 'Off')
-            af_point = exif_data.get('PrimaryAFPoint', exif_data.get('AFPointsUsed', 'Center'))
+            af_point = exif_data.get('PrimaryAFPoint', exif_data.get('AFPointsUsed', 'Center Focus'))
             lens_info = exif_data.get('LensID', exif_data.get('Lens', 'N/A'))
 
-            # 2. ประมวลผลภาพและความคมชัดด้วย OpenCV (รองรับ RAW โดยดึง Preview)
+            # 2. แปลงไฟล์ RAW เป็นภาพถ่าย (ผ่าน JpgFromRaw หรือ PreviewImage) หรืออ่านภาพ JPEG ปกติด้วย OpenCV
             sharpness_score = 0.0
             img_cv = None
             
-            if file.filename.lower().endswith(('.nef', '.cr2', '.arw', '.raw')):
+            if file.filename.lower().endswith(('.nef', '.cr2', '.arw', '.raw', '.dng')):
                 cmd_img = ['exiftool', '-b', '-JpgFromRaw', temp_path]
                 res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
                 if not res_img.stdout:
@@ -79,24 +83,25 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
                 gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
                 sharpness_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-                # วาดกรอบจุดโฟกัสจำลอง (AF Point Visualization) บริเวณกลางภาพหรือตามพิกัด
+                # วาดกรอบจุดโฟกัส (AF Point Visualization) บนภาพถ่ายที่แปลงมาจากไฟล์ดิบ
                 h, w, _ = img_cv.shape
                 cx, cy = w // 2, h // 2
                 bw, bh = int(w * 0.08), int(h * 0.08)
                 cv2.rectangle(img_cv, (cx - bw, cy - bh), (cx + bw, cy + bh), (0, 0, 255), max(4, int(w*0.004)))
-                cv2.putText(img_cv, f"AF Point: {af_point}", (cx - bw, cy - bh - 15), 
+                cv2.putText(img_cv, f"AF: {af_point}", (cx - bw, cy - bh - 15), 
                             cv2.FONT_HERSHEY_SIMPLEX, max(0.8, w*0.001), (0, 0, 255), 2)
 
-                # แปลงภาพที่วาดกรอบแล้วเป็น Base64 เพื่อส่งกลับไปแสดงผลที่หน้าเว็บ
+                # เข้ารหัสภาพเป็น Base64 เพื่อส่งกลับไปแสดงผลพรีวิวที่หน้าเว็บ
                 _, buffer = cv2.imencode('.jpg', img_cv)
                 annotated_base64 = base64.b64encode(buffer).decode('utf-8')
 
-            # ประเมินคุณภาพ
+            # ประเมินเกณฑ์คุณภาพความคมชัด
             rating = "🔴 เบลอ" if sharpness_score < 100 else "🟡 พอใช้" if sharpness_score < 500 else "🟢 คมชัดดี" if sharpness_score < 1500 else "⭐ ยอดเยี่ยม"
 
             results.append({
                 "filename": file.filename,
                 "camera_model": camera_model,
+                "lens": lens_info,
                 "sharpness": round(sharpness_score, 2),
                 "quality": rating,
                 "iso": iso,
@@ -105,7 +110,6 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
                 "af_fine_tune": af_fine_tune,
                 "af_status": af_status,
                 "af_point": af_point,
-                "lens": lens_info,
                 "annotated_image": f"data:image/jpeg;base64,{annotated_base64}" if annotated_base64 else ""
             })
 
