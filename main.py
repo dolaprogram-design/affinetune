@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
@@ -7,8 +7,9 @@ import subprocess
 import json
 import os
 import tempfile
+import base64
 
-app = FastAPI(title="Lens Focus & AF Fine-Tune Analysis API")
+app = FastAPI(title="Pro Lens & Camera Analytics Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,72 +27,92 @@ def read_root():
     except FileNotFoundError:
         return "<h3>ไม่พบไฟล์ index.html กรุณาอัปโหลดขึ้นระบบ</h3>"
 
-@app.post("/analyze")
-async def analyze_image(file: UploadFile = File(...)):
-    # บันทึกไฟล์ที่อัปโหลดชั่วคราวเพื่อใช้กับ ExifTool และ OpenCV
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp:
-        contents = await file.read()
-        temp.write(contents)
-        temp_path = temp.name
+@app.post("/analyze-batch")
+async def analyze_batch(files: list[UploadFile] = File(...)):
+    results = []
+    
+    for file in files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp:
+            contents = await file.read()
+            temp.write(contents)
+            temp_path = temp.name
 
-    try:
-        # 1. ใช้ ExifTool ดึงข้อมูลเชิงลึกและ MakerNotes ทั้งหมดแบบ JSON (-j)
-        cmd = ['exiftool', '-j', temp_path]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-        exif_data = {}
-        if res.returncode == 0 and res.stdout:
-            exif_list = json.loads(res.stdout)
-            if exif_list:
-                exif_data = exif_list[0]
+        try:
+            # 1. อ่าน Exif และ MakerNotes ด้วย ExifTool
+            cmd = ['exiftool', '-j', temp_path]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+            exif_data = {}
+            if res.returncode == 0 and res.stdout:
+                exif_list = json.loads(res.stdout)
+                if exif_list:
+                    exif_data = exif_list[0]
 
-        # ดึงค่าเฉพาะที่สำคัญ
-        camera_model = exif_data.get('Model', 'N/A')
-        iso = exif_data.get('ISO', exif_data.get('ISOSpeedRatings', 'N/A'))
-        f_number = exif_data.get('FNumber', 'N/A')
-        focal_length = exif_data.get('FocalLength', 'N/A')
-        
-        # ดึงค่า AF Fine-tune จาก MakerNotes (รองรับหลายรูปแบบ Tag)
-        af_fine_tune = exif_data.get('AFFineTuneAdj', exif_data.get('AFMicroAdj', exif_data.get('Microadjustment', 'N/A')))
-        af_status = exif_data.get('AFFineTune', 'Off')
+            camera_model = exif_data.get('Model', 'N/A')
+            iso = exif_data.get('ISO', exif_data.get('ISOSpeedRatings', 'N/A'))
+            f_number = exif_data.get('FNumber', 'N/A')
+            focal_length = exif_data.get('FocalLength', 'N/A')
+            af_fine_tune = exif_data.get('AFFineTuneAdj', exif_data.get('AFMicroAdj', 'N/A'))
+            af_status = exif_data.get('AFFineTune', 'Off')
+            af_point = exif_data.get('PrimaryAFPoint', exif_data.get('AFPointsUsed', 'Center'))
+            lens_info = exif_data.get('LensID', exif_data.get('Lens', 'N/A'))
 
-        # 2. คำนวณความคมชัดด้วย OpenCV (รองรับการดึงภาพ Preview จากไฟล์ RAW เช่น .NEF)
-        sharpness_score = 0.0
-        img_cv = None
-        
-        if file.filename.lower().endswith(('.nef', '.cr2', '.arw')):
-            # ดึงภาพ Preview จากไฟล์ RAW
-            cmd_img = ['exiftool', '-b', '-JpgFromRaw', temp_path]
-            res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
-            if not res_img.stdout:
-                cmd_img = ['exiftool', '-b', '-PreviewImage', temp_path]
-                res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
+            # 2. ประมวลผลภาพและความคมชัดด้วย OpenCV (รองรับ RAW โดยดึง Preview)
+            sharpness_score = 0.0
+            img_cv = None
             
-            if res_img.stdout:
-                nparr = np.frombuffer(res_img.stdout, np.uint8)
-                img_cv = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-        else:
-            nparr = np.frombuffer(contents, np.uint8)
-            img_cv = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+            if file.filename.lower().endswith(('.nef', '.cr2', '.arw', '.raw')):
+                cmd_img = ['exiftool', '-b', '-JpgFromRaw', temp_path]
+                res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
+                if not res_img.stdout:
+                    cmd_img = ['exiftool', '-b', '-PreviewImage', temp_path]
+                    res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
+                
+                if res_img.stdout:
+                    nparr = np.frombuffer(res_img.stdout, np.uint8)
+                    img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            else:
+                nparr = np.frombuffer(contents, np.uint8)
+                img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if img_cv is not None:
-            sharpness_score = float(cv2.Laplacian(img_cv, cv2.CV_64F).var())
+            annotated_base64 = ""
+            if img_cv is not None:
+                gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+                sharpness_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-        return {
-            "filename": file.filename,
-            "camera_model": camera_model,
-            "sharpness_score": round(sharpness_score, 2),
-            "af_fine_tune": af_fine_tune,
-            "af_status": af_status,
-            "exif_data": {
-                "ISO": iso,
-                "FNumber": f_number,
-                "FocalLength": focal_length,
-                "Lens": exif_data.get('LensID', exif_data.get('Lens', 'N/A'))
-            }
-        }
+                # วาดกรอบจุดโฟกัสจำลอง (AF Point Visualization) บริเวณกลางภาพหรือตามพิกัด
+                h, w, _ = img_cv.shape
+                cx, cy = w // 2, h // 2
+                bw, bh = int(w * 0.08), int(h * 0.08)
+                cv2.rectangle(img_cv, (cx - bw, cy - bh), (cx + bw, cy + bh), (0, 0, 255), max(4, int(w*0.004)))
+                cv2.putText(img_cv, f"AF Point: {af_point}", (cx - bw, cy - bh - 15), 
+                            cv2.FONT_HERSHEY_SIMPLEX, max(0.8, w*0.001), (0, 0, 255), 2)
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+                # แปลงภาพที่วาดกรอบแล้วเป็น Base64 เพื่อส่งกลับไปแสดงผลที่หน้าเว็บ
+                _, buffer = cv2.imencode('.jpg', img_cv)
+                annotated_base64 = base64.b64encode(buffer).decode('utf-8')
+
+            # ประเมินคุณภาพ
+            rating = "🔴 เบลอ" if sharpness_score < 100 else "🟡 พอใช้" if sharpness_score < 500 else "🟢 คมชัดดี" if sharpness_score < 1500 else "⭐ ยอดเยี่ยม"
+
+            results.append({
+                "filename": file.filename,
+                "camera_model": camera_model,
+                "sharpness": round(sharpness_score, 2),
+                "quality": rating,
+                "iso": iso,
+                "f_number": f_number,
+                "focal_length": focal_length,
+                "af_fine_tune": af_fine_tune,
+                "af_status": af_status,
+                "af_point": af_point,
+                "lens": lens_info,
+                "annotated_image": f"data:image/jpeg;base64,{annotated_base64}" if annotated_base64 else ""
+            })
+
+        except Exception as e:
+            results.append({"filename": file.filename, "error": str(e)})
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    return JSONResponse(content={"results": results})
