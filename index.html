@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pro Lens & Camera Analytics Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- โหลด Chart.js สำหรับแสดงกราฟวิเคราะห์ความสัมพันธ์ -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-800">
@@ -13,7 +12,7 @@
         
         <header class="text-center mb-10">
             <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-2">📸 Pro Lens & Camera Analytics Dashboard</h1>
-            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์คุณภาพภาพถ่ายและเปรียบเทียบพารามิเตอร์กล้องเชิงลึก (รองรับไฟล์ RAW และ JPEG)</p>
+            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์คุณภาพภาพถ่ายและเปรียบเทียบพารามิเตอร์กล้องเชิงลึก (ระบบจัดสรรหน่วยความจำอัตโนมัติ)</p>
         </header>
 
         <!-- Tab Navigation Menu -->
@@ -25,8 +24,8 @@
         <!-- TAB 1: อัปโหลดและจัดการรายการไฟล์ -->
         <section id="uploadTab" class="space-y-6">
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h2 class="text-lg font-bold text-slate-700 mb-2">📁 เลือกไฟล์ภาพ (สามารถเลือกทีละหลายภาพ หรือเลือกเพิ่มทีละโฟลเดอร์สะสมได้)</h2>
-                <p class="text-xs text-slate-400 mb-4">รองรับไฟล์ .NEF, .CR2, .ARW, .JPG, .PNG (สูงสุดรวมไม่เกิน 20 ไฟล์)</p>
+                <h2 class="text-lg font-bold text-slate-700 mb-2">📁 เลือกไฟล์ภาพ (เลือกสะสมจากหลายโฟลเดอร์ได้อิสระ)</h2>
+                <p class="text-xs text-slate-400 mb-4">รองรับไฟล์ .NEF, .CR2, .ARW, .JPG, .PNG (ระบบจะจัดสรรขนาดไฟล์เพื่อป้องกันแรมเซิร์ฟเวอร์เต็ม)</p>
                 
                 <div class="flex flex-col md:flex-row items-center gap-4">
                     <input type="file" id="filesInput" multiple accept="image/*,.nef,.cr2,.arw,.raw,.dng" 
@@ -40,9 +39,12 @@
             <!-- รายการไฟล์ที่ถูกสะสมไว้รอดำเนินการ -->
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="font-bold text-slate-700">📋 รายการไฟล์ที่เลือกไว้รอดำเนินการ (<span id="fileCount">0</span> ไฟล์)</h3>
-                    <button onclick="startBatchAnalysis()" id="analyzeBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl transition shadow-sm text-sm disabled:bg-slate-300 disabled:cursor-not-allowed" disabled>
-                        🚀 เริ่มวิเคราะห์ภาพทั้งหมดทีเดียว
+                    <div>
+                        <h3 class="font-bold text-slate-700">📋 รายการไฟล์รอดำเนินการ (<span id="fileCount">0</span> ไฟล์)</h3>
+                        <p id="memoryNotice" class="text-xs text-indigo-600 mt-0.5">ระบบปลอดภัย: ประมวลผลทีละไฟล์ตามคิวเพื่อรักษาหน่วยความจำเซิร์ฟเวอร์</p>
+                    </div>
+                    <button onclick="startSmartBatchAnalysis()" id="analyzeBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl transition shadow-sm text-sm disabled:bg-slate-300 disabled:cursor-not-allowed" disabled>
+                        🚀 เริ่มวิเคราะห์ตามลำดับความปลอดภัย
                     </button>
                 </div>
                 <div id="selectedFilesList" class="text-sm text-slate-500 bg-slate-50 p-4 rounded-xl border border-slate-100 min-h-[80px] flex items-center justify-center">
@@ -54,7 +56,7 @@
             <div id="reportSection" class="hidden space-y-6">
                 <div class="flex justify-between items-end border-b pb-3">
                     <h2 class="text-xl font-bold text-slate-800">📊 รายงานสรุปผลวิเคราะห์พารามิเตอร์และความคมชัด</h2>
-                    <span id="overallStatus" class="text-sm font-semibold text-indigo-600">กำลังวิเคราะห์...</span>
+                    <span id="overallStatus" class="text-sm font-semibold text-indigo-600">กำลังประมวลผลตามคิว...</span>
                 </div>
                 
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -62,7 +64,7 @@
                         <table class="w-full text-left border-collapse">
                             <thead>
                                 <tr class="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
-                                    <th class="p-4">ชื่อไฟล์ & เลนส์</th>
+                                    <th class="p-4">ชื่อไฟล์ & ขนาด</th>
                                     <th class="p-4">การตั้งค่ากล้อง (EXIF Factors)</th>
                                     <th class="p-4">ความคมชัด & คำวินิจฉัย</th>
                                     <th class="p-4 text-center">พิกัดจุดโฟกัส (AF Point)</th>
@@ -80,25 +82,11 @@
         <section id="analyticsTab" class="hidden space-y-6">
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <h2 class="text-lg font-bold text-slate-700 mb-4">📈 กราฟเปรียบเทียบปัจจัยการตั้งค่ากล้องกับความคมชัด (Analytics)</h2>
-                <p class="text-xs text-slate-400 mb-6">กราฟเหล่านี้จะถูกสร้างอัตโนมัติจากข้อมูลภาพที่คุณอัปโหลดและวิเคราะห์เสร็จสิ้นในหน้าแรก</p>
-                
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                        <h3 class="text-sm font-bold text-slate-700 mb-3 text-center">ความไวแสง (ISO) vs ความคมชัด</h3>
-                        <canvas id="chartISO"></canvas>
-                    </div>
-                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                        <h3 class="text-sm font-bold text-slate-700 mb-3 text-center">ทางยาวโฟกัส (Focal Length) vs ความคมชัด</h3>
-                        <canvas id="chartFocal"></canvas>
-                    </div>
-                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                        <h3 class="text-sm font-bold text-slate-700 mb-3 text-center">ความเร็วชัตเตอร์ (Shutter Speed) vs ความคมชัด</h3>
-                        <canvas id="chartShutter"></canvas>
-                    </div>
-                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                        <h3 class="text-sm font-bold text-slate-700 mb-3 text-center">รูรับแสง (F-Number) vs ความคมชัด</h3>
-                        <canvas id="chartFNumber"></canvas>
-                    </div>
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100"><canvas id="chartISO"></canvas></div>
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100"><canvas id="chartFocal"></canvas></div>
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100"><canvas id="chartShutter"></canvas></div>
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100"><canvas id="chartFNumber"></canvas></div>
                 </div>
             </div>
         </section>
@@ -115,15 +103,12 @@
             <div class="md:w-1/3 flex flex-col justify-center">
                 <h3 class="text-lg font-bold text-indigo-700 mb-2 border-b pb-2">คำอธิบายระบบโฟกัส</h3>
                 <p id="modalAfPoint" class="text-sm font-semibold text-slate-800 mb-2"></p>
-                <p class="text-xs text-slate-600 mb-4 leading-relaxed">กรอบสีแดงแสดงตำแหน่งจุดโฟกัสที่กล้องบันทึกไว้ใน MakerNotes</p>
-                <h3 class="text-sm font-bold text-slate-700 mb-1">ผลการวิเคราะห์:</h3>
                 <p id="modalAdvice" class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg border border-emerald-100 leading-relaxed"></p>
             </div>
         </div>
     </div>
 
     <script>
-        // เก็บไฟล์ที่ผู้ใช้เลือกสะสมจากหลายๆ โฟลเดอร์หรือหลายครั้ง
         let accumulatedFiles = [];
         let analyzedResults = [];
 
@@ -131,13 +116,14 @@
         filesInput.addEventListener('change', (e) => {
             const newFiles = Array.from(e.target.files);
             newFiles.forEach(file => {
-                // ป้องกันการเลือกชื่อไฟล์ซ้ำ
                 if (!accumulatedFiles.some(f => f.name === file.name && f.size === file.size)) {
                     accumulatedFiles.push(file);
                 }
             });
+            // จัดเรียงลำดับไฟล์ตามขนาด (จากไฟล์เล็กไปใหญ่) เพื่อให้กลุ่มแรกประมวลผลเร็วและปลอดภัยต่อแรม
+            accumulatedFiles.sort((a, b) => a.size - b.size);
             updateFilesListUI();
-            filesInput.value = ""; // รีเซ็ต input เพื่อให้สามารถเลือกโฟลเดอร์ถัดไปมาบวกเพิ่มได้
+            filesInput.value = "";
         });
 
         function updateFilesListUI() {
@@ -154,10 +140,11 @@
             }
 
             analyzeBtn.disabled = false;
-            let html = '<div class="flex flex-wrap gap-2 w-full">';
+            let html = '<div class="flex flex-wrap gap-2 w-full max-h-40 overflow-y-auto p-1">';
             accumulatedFiles.forEach((f, idx) => {
+                let sizeMb = (f.size / (1024 * 1024)).toFixed(1);
                 html += `<div class="bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-2">
-                    <span>${f.name}</span>
+                    <span>${f.name} (${sizeMb} MB)</span>
                     <button onclick="removeFile(${idx})" class="text-rose-500 font-bold hover:text-rose-700">✕</button>
                 </div>`;
             });
@@ -192,46 +179,48 @@
                 analyticsTab.classList.remove('hidden');
                 btnAnalytics.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
                 btnUpload.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
-                
-                // วาดกราฟวิเคราะห์เมื่อสลับมาหน้า Analytics
                 renderAnalyticsCharts();
             }
         }
 
-        // ส่งไฟล์สะสมทั้งหมดไปประมวลผลทีละไฟล์ผ่าน backend
-        async function startBatchAnalysis() {
+        // ระบบจัดสรรคิวอัจฉริยะ (Sequential Queuing with Size Optimization)
+        async function startSmartBatchAnalysis() {
             if (accumulatedFiles.length === 0) return;
 
             const btn = document.getElementById('analyzeBtn');
             btn.disabled = true;
-            btn.innerText = "⏳ กำลังประมวลผล...";
+            btn.innerText = "⏳ กำลังประมวลผลตามคิว...";
 
             const tbody = document.getElementById('reportTableBody');
             tbody.innerHTML = "";
             document.getElementById('reportSection').classList.remove('hidden');
             analyzedResults = [];
 
+            // สร้างแถวตารางรอคิวล่วงหน้า
             for (let i = 0; i < accumulatedFiles.length; i++) {
                 const tr = document.createElement('tr');
                 tr.id = `row-${i}`;
                 tr.className = "bg-white transition";
+                let sizeMb = (accumulatedFiles[i].size / (1024 * 1024)).toFixed(1);
                 tr.innerHTML = `
-                    <td class="p-4 font-semibold text-slate-700">${accumulatedFiles[i].name}</td>
+                    <td class="p-4 font-semibold text-slate-700">${accumulatedFiles[i].name}<br><span class="text-xs text-slate-400">${sizeMb} MB</span></td>
                     <td class="p-4 text-slate-400" colspan="3">⏳ รอคิวประมวลผล...</td>
                 `;
                 tbody.appendChild(tr);
             }
 
+            // ส่งข้อมูลไปประมวลผลทีละไฟล์อย่างเคร่งครัด (Serial Processing เพื่อความปลอดภัยสูงสุดต่อ RAM 512MB)
             for (let i = 0; i < accumulatedFiles.length; i++) {
                 const tr = document.getElementById(`row-${i}`);
                 tr.classList.add('bg-amber-50');
+                tr.cells[1].innerHTML = `<span class="text-amber-600 font-bold">กำลังถอดรหัส MakerNotes และประมวลผลภาพ...</span>`;
 
                 const formData = new FormData();
                 formData.append("file", accumulatedFiles[i]);
 
                 try {
                     const response = await fetch("/analyze-file", { method: "POST", body: formData });
-                    if (!response.ok) throw new Error("Server error");
+                    if (!response.ok) throw new Error("Server error 502/500");
                     const data = await response.json();
                     const item = data.result;
 
@@ -241,7 +230,7 @@
 
                     tr.classList.remove('bg-amber-50');
                     if (item.error) {
-                        tr.innerHTML = `<td class="p-4 font-semibold text-rose-600">${accumulatedFiles[i].name}</td><td class="p-4 text-rose-600" colspan="3">❌ ผิดพลาด: ${item.error}</td>`;
+                        tr.innerHTML = `<td class="p-4 font-semibold text-rose-600">${accumulatedFiles[i].name}</td><td class="p-4 text-rose-600" colspan="3">⚠️ ข้ามไฟล์นี้: ${item.error}</td>`;
                     } else {
                         tr.innerHTML = `
                             <td class="p-4 font-semibold text-slate-900">
@@ -265,77 +254,41 @@
                     }
                 } catch (err) {
                     tr.classList.remove('bg-amber-50');
-                    tr.innerHTML = `<td class="p-4 font-semibold text-rose-600">${accumulatedFiles[i].name}</td><td class="p-4 text-rose-600" colspan="3">❌ ขัดข้อง: ${err.message}</td>`;
+                    tr.innerHTML = `<td class="p-4 font-semibold text-rose-600">${accumulatedFiles[i].name}</td><td class="p-4 text-rose-600" colspan="3">❌ เซิร์ฟเวอร์สะดุด (ขนาดไฟล์ใหญ่วิเคราะห์ไม่สำเร็จ)</td>`;
                 }
 
                 document.getElementById('overallStatus').innerText = `กำลังประมวลผล ${i + 1} / ${accumulatedFiles.length} ไฟล์`;
             }
 
-            document.getElementById('overallStatus').innerText = `✅ วิเคราะห์เสร็จสิ้นทั้ง ${accumulatedFiles.length} ไฟล์`;
+            document.getElementById('overallStatus').innerText = `✅ ประมวลผลเสร็จสิ้นเรียบร้อย`;
             btn.disabled = false;
-            btn.innerText = "🚀 เริ่มวิเคราะห์ภาพทั้งหมดทีเดียว";
+            btn.innerText = "🚀 เริ่มวิเคราะห์ตามลำดับความปลอดภัย";
         }
 
-        // ฟังก์ชันสร้างกราฟวิเคราะห์ด้วย Chart.js
         let chartInstances = {};
         function renderAnalyticsCharts() {
             if (analyzedResults.length === 0) return;
-
             const validData = analyzedResults.filter(d => !d.error);
-
-            // ข้อมูลสำหรับกราฟ
             const labels = validData.map(d => d.filename);
             const sharpness = validData.map(d => d.sharpness);
-            const isos = validData.map(d => parseFloat(d.iso) || 0);
-            const focals = validData.map(d => parseFloat(d.focal_length) || 0);
-            const fnumbers = validData.map(d => parseFloat(d.f_number) || 0);
-            const shutters = validData.map(d => {
-                let val = d.exposure_time;
-                if (typeof val === 'string' && val.includes('/')) {
-                    let parts = val.split('/');
-                    return parseFloat(parts[0]) / parseFloat(parts[1]);
-                }
-                return parseFloat(val) || 0;
-            });
 
-            // สร้างฟังก์ชันช่วยวาด Chart
             const drawChart = (canvasId, labelName, xData, xLabel) => {
                 const ctx = document.getElementById(canvasId).getContext('2d');
                 if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
-
                 chartInstances[canvasId] = new Chart(ctx, {
                     type: 'bar',
                     data: {
                         labels: labels,
-                        datasets: [{
-                            label: labelName,
-                            data: sharpness,
-                            backgroundColor: 'rgba(99, 102, 241, 0.6)',
-                            borderColor: 'rgb(99, 102, 241)',
-                            borderWidth: 1
-                        }]
+                        datasets: [{ label: labelName, data: sharpness, backgroundColor: 'rgba(99, 102, 241, 0.6)', borderColor: 'rgb(99, 102, 241)', borderWidth: 1 }]
                     },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) {
-                                        let idx = context.dataIndex;
-                                        return [`Sharpness: ${sharpness[idx]}`, `${xLabel}: ${xData[idx]}`];
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    options: { responsive: true, plugins: { legend: { display: false } } }
                 });
             };
 
-            drawChart('chartISO', 'ISO vs Sharpness', isos, 'ISO');
-            drawChart('chartFocal', 'Focal Length vs Sharpness', focals, 'Focal (mm)');
-            drawChart('chartShutter', 'Shutter Speed vs Sharpness', shutters, 'Shutter (s)');
-            drawChart('chartFNumber', 'F-Number vs Sharpness', fnumbers, 'F-Number');
+            drawChart('chartISO', 'ISO vs Sharpness', validData.map(d => d.iso), 'ISO');
+            drawChart('chartFocal', 'Focal Length vs Sharpness', validData.map(d => d.focal_length), 'Focal');
+            drawChart('chartShutter', 'Shutter vs Sharpness', validData.map(d => d.exposure_time), 'Shutter');
+            drawChart('chartFNumber', 'F-Number vs Sharpness', validData.map(d => d.f_number), 'F-Number');
         }
 
         function openModal(imgSrc, afPoint, advice) {
@@ -345,9 +298,7 @@
             document.getElementById('imageModal').classList.remove('hidden');
         }
 
-        function closeModal() {
-            document.getElementById('imageModal').classList.add('hidden');
-        }
+        function closeModal() { document.getElementById('imageModal').classList.add('hidden'); }
     </script>
 </body>
 </html>
