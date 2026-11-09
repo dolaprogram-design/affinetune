@@ -101,7 +101,7 @@
                         <div class="h-64 relative">
                             <canvas id="chartAFFineTune"></canvas>
                         </div>
-                        <p class="text-xs text-indigo-700 leading-relaxed bg-white p-3 rounded-xl border border-indigo-200 mt-6">
+                        <p id="insightAFFineTune" class="text-xs text-indigo-700 leading-relaxed bg-white p-3 rounded-xl border border-indigo-200 mt-6">
                             <b><span class="text-indigo-900">วิเคราะห์การปรับจูน:</span></b> กราฟนี้จะแสดงค่าจากน้อยไปมาก แท่งที่สูงที่สุดคือค่าระยะโฟกัสที่แม่นยำที่สุด (Sweet Spot) สำหรับเลนส์ตัวนี้ หากกราฟเบ้ไปทางลบแสดงว่าเลนส์มีอาการ Front Focus หากเบ้ไปทางบวกแสดงว่าเป็น Back Focus
                         </p>
                     </div>
@@ -109,28 +109,28 @@
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">1. ความไวแสง (ISO) vs ความคมชัด</h3>
                         <div class="h-64"><canvas id="chartISO"></canvas></div>
-                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
+                        <p id="insightISO" class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
                             <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ค่า ISO สูงเกินไปจะเกิด Noise ซึ่งอัลกอริทึมความคมชัดอาจอ่านเป็นความคมเทียมหรือบั่นทอนความเนียน ควรใช้ ISO ต่ำที่สุดเท่าที่ทำได้
                         </p>
                     </div>
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">2. ทางยาวโฟกัส (Focal Length) vs ความคมชัด</h3>
                         <div class="h-64"><canvas id="chartFocal"></canvas></div>
-                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
+                        <p id="insightFocal" class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
                             <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> เลนส์ซูมส่วนใหญ่มีช่วง Sweet Spot ที่คมที่สุดช่วงกลางๆ การซูมสุดขีดมักมีความคมชัดลดลงเล็กน้อย
                         </p>
                     </div>
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">3. ความเร็วชัตเตอร์ (Shutter Speed) vs ความคมชัด</h3>
                         <div class="h-64"><canvas id="chartShutter"></canvas></div>
-                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
+                        <p id="insightShutter" class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
                             <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ชัตเตอร์ช้าเกินไปทำให้เกิด Camera Shake ตามกฎ Reciprocal Rule ความเร็วชัตเตอร์ควรสัมพันธ์กับทางยาวโฟกัส
                         </p>
                     </div>
                     <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <h3 class="text-sm font-bold text-slate-800 text-center">4. รูรับแสง (F-Number) vs ความคมชัด</h3>
                         <div class="h-64"><canvas id="chartFNumber"></canvas></div>
-                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
+                        <p id="insightFNumber" class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200 mt-6">
                             <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> เปิดกว้างสุดมักมีความซอฟต์ การหรี่มาที่ f/4 - f/8 มักเป็นจุดที่คมที่สุด แต่ถ้าแคบเกินไปจะเกิดการหักเหแสง (Diffraction)
                         </p>
                     </div>
@@ -439,6 +439,66 @@
 
         Chart.register(drawImagePlugin);
 
+
+        function generateDataDrivenInsights(validData) {
+            if (validData.length === 0) return;
+
+            let best = validData.reduce((prev, curr) => (curr.sharpness > prev.sharpness) ? curr : prev);
+            let worst = validData.reduce((prev, curr) => (curr.sharpness < prev.sharpness) ? curr : prev);
+
+            // 1. AF Fine-tune
+            let afText = `<b><span class="text-indigo-900">วิเคราะห์จากข้อมูลจริง:</span></b> จากชุดทดสอบนี้ ค่าความคมชัดสูงสุด (คะแนน ${best.sharpness}) เกิดขึ้นที่ระยะ AF Fine-tune <b>${best.af_fine_tune}</b> ซึ่งชี้ให้เห็นว่านี่คือจุดโฟกัสที่แม่นยำที่สุด (Sweet Spot) สำหรับชุดภาพนี้ครับ`;
+            let afElem = document.getElementById('insightAFFineTune');
+            if (afElem) afElem.innerHTML = afText;
+
+            // 2. ISO
+            let isoText = `<b><span class="text-indigo-600">วิเคราะห์จากข้อมูลจริง:</span></b> ภาพที่คมชัดที่สุดใช้ ISO <b>${best.iso}</b> `;
+            let highIsoData = validData.filter(d => parseFloat(d.iso) > parseFloat(best.iso));
+            if(highIsoData.length > 0) {
+                let avgHighIso = highIsoData.reduce((sum, d) => sum + d.sharpness, 0) / highIsoData.length;
+                isoText += `ในขณะที่กลุ่มภาพซึ่งใช้ ISO สูงกว่านี้ มีคะแนนความคมชัดเฉลี่ยตกลงมาอยู่ที่ ${avgHighIso.toFixed(2)} ยืนยันพฤติกรรมว่าการดัน ISO สูงขึ้นมีผลบั่นทอนรายละเอียดภาพจริงในไฟล์ของคุณ`;
+            } else {
+                isoText += `ซึ่งเป็นค่า ISO ต่ำที่สุดที่ใช้ในชุดนี้ สอดคล้องกับหลักการที่ว่า ISO ต่ำให้รายละเอียดสัญญาณภาพที่สะอาดและคมชัดที่สุด`;
+            }
+            let isoElem = document.getElementById('insightISO');
+            if (isoElem) isoElem.innerHTML = isoText;
+
+            // 3. Focal Length
+            let focalText = `<b><span class="text-indigo-600">วิเคราะห์จากข้อมูลจริง:</span></b> ระยะซูมที่ให้ภาพคมชัดที่สุดในชุดข้อมูลนี้คือ <b>${best.focal_length}</b> (คะแนน ${best.sharpness}) `;
+            if (best.focal_length !== worst.focal_length) {
+                focalText += `เปรียบเทียบกับระยะ ${worst.focal_length} ที่ให้คะแนนเพียง (${worst.sharpness}) แสดงให้เห็นถึงจุด Sweet Spot ของชิ้นแก้วในกระบอกซูมของคุณอย่างชัดเจน`;
+            }
+            let focalElem = document.getElementById('insightFocal');
+            if (focalElem) focalElem.innerHTML = focalText;
+
+            // 4. Shutter Speed
+            const parseShutter = (val) => {
+                if (typeof val === 'string' && val.includes('/')) {
+                    let parts = val.split('/');
+                    return parseFloat(parts[0]) / parseFloat(parts[1]);
+                }
+                return parseFloat(val) || 0;
+            };
+            let shutterText = `<b><span class="text-indigo-600">วิเคราะห์จากข้อมูลจริง:</span></b> ชัตเตอร์สปีดที่ให้ผลลัพธ์คมชัดสูงสุดคือ <b>${best.exposure_time}s</b> `;
+            let worstShutter = worst.exposure_time;
+            if (parseShutter(worstShutter) < parseShutter(best.exposure_time)) {
+                shutterText += `เมื่อเทียบกับชัตเตอร์ที่ช้ากว่าอย่าง ${worstShutter}s (คะแนน ${worst.sharpness}) จะเห็นได้ว่าเริ่มมีอาการสูญเสียความคมชัดจากความสั่นไหว (Micro-shake) เข้ามารบกวน`;
+            } else {
+                shutterText += `ซึ่งเป็นความเร็วที่เพียงพอจะหยุดการสั่นไหวตามสัดส่วนทางยาวโฟกัสได้อย่างสมบูรณ์แบบ`;
+            }
+            let shutterElem = document.getElementById('insightShutter');
+            if (shutterElem) shutterElem.innerHTML = shutterText;
+
+            // 5. F-Number
+            let fnumText = `<b><span class="text-indigo-600">วิเคราะห์จากข้อมูลจริง:</span></b> รูรับแสง f/<b>${best.f_number}</b> คือจุดที่มีประสิทธิภาพ Optical สูงสุดสำหรับเลนส์ตัวนี้ในชุดข้อมูลปัจจุบัน `;
+            let wideApertures = validData.filter(d => parseFloat(d.f_number) < parseFloat(best.f_number));
+            if(wideApertures.length > 0) {
+                fnumText += `การเปิดรูรับแสงให้กว้างขึ้นกว่านี้ (เช่น f/${wideApertures[0].f_number}) ทำให้ความคมชัดเฉลี่ยตกลงมาอยู่ที่ ${wideApertures[0].sharpness}`;
+            }
+            let fnumElem = document.getElementById('insightFNumber');
+            if (fnumElem) fnumElem.innerHTML = fnumText;
+        }
+
         function renderAnalyticsCharts() {
             if (analyzedResults.length === 0) return;
             const validData = analyzedResults.filter(d => !d.error);
@@ -585,6 +645,9 @@
             drawSmartChart('chartFocal', 'Focal Length vs Sharpness', validData, 'focal_length', (v) => parseFloat(v) || 0);
             drawSmartChart('chartShutter', 'Shutter vs Sharpness', validData, 'exposure_time', parseShutter);
             drawSmartChart('chartFNumber', 'F-Number vs Sharpness', validData, 'f_number', (v) => parseFloat(v) || 0);
+            
+            // ประมวลผล Data-Driven Insights แทนที่ข้อความวิชาการทั่วไป
+            generateDataDrivenInsights(validData);
         }
 
         function openModal(imgSrc, afPoint, advice) {
