@@ -29,9 +29,9 @@ def read_root():
 
 @app.post("/analyze-batch")
 async def analyze_batch(files: list[UploadFile] = File(...)):
-    # จำกัดไม่ให้เกิน 10 ไฟล์ต่อครั้งตามเงื่อนไข
+    # จำกัดจำนวนไฟล์สูงสุดที่ 10 ไฟล์ต่อครั้ง
     if len(files) > 10:
-        raise HTTPException(status_code=400, detail="สามารถอัปโหลดไฟล์พร้อมกันได้สูงสุดไม่เกิน 10 ไฟล์ครับ")
+        raise HTTPException(status_code=400, detail="สามารถอัปโหลดได้สูงสุด 10 ไฟล์ต่อครั้งครับ")
 
     results = []
     
@@ -42,7 +42,7 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
             temp_path = temp.name
 
         try:
-            # 1. ดึงข้อมูล Exif และ MakerNotes เชิงลึกด้วย ExifTool
+            # 1. ใช้ ExifTool ดึงข้อมูลเชิงลึกทั้งหมด
             cmd = ['exiftool', '-j', temp_path]
             res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
             exif_data = {}
@@ -51,6 +51,7 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
                 if exif_list:
                     exif_data = exif_list[0]
 
+            # 2. สกัดข้อมูลที่ต้องการ
             camera_model = exif_data.get('Model', 'N/A')
             iso = exif_data.get('ISO', exif_data.get('ISOSpeedRatings', 'N/A'))
             f_number = exif_data.get('FNumber', 'N/A')
@@ -60,7 +61,7 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
             af_point = exif_data.get('PrimaryAFPoint', exif_data.get('AFPointsUsed', 'Center Focus'))
             lens_info = exif_data.get('LensID', exif_data.get('Lens', 'N/A'))
 
-            # 2. แปลงไฟล์ RAW เป็นภาพถ่าย (ผ่าน JpgFromRaw หรือ PreviewImage) หรืออ่านภาพ JPEG ปกติด้วย OpenCV
+            # 3. แปลง RAW เป็นภาพสำหรับวิเคราะห์
             sharpness_score = 0.0
             img_cv = None
             
@@ -80,22 +81,22 @@ async def analyze_batch(files: list[UploadFile] = File(...)):
 
             annotated_base64 = ""
             if img_cv is not None:
+                # คำนวณความคมชัด
                 gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
                 sharpness_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-                # วาดกรอบจุดโฟกัส (AF Point Visualization) บนภาพถ่ายที่แปลงมาจากไฟล์ดิบ
+                # จำลองและวาดจุดโฟกัส
                 h, w, _ = img_cv.shape
                 cx, cy = w // 2, h // 2
                 bw, bh = int(w * 0.08), int(h * 0.08)
-                cv2.rectangle(img_cv, (cx - bw, cy - bh), (cx + bw, cy + bh), (0, 0, 255), max(4, int(w*0.004)))
+                cv2.rectangle(img_cv, (cx - bw, cy - bh), (cx + bw, cy + bh), (0, 0, 255), max(4, int(w * 0.004)))
                 cv2.putText(img_cv, f"AF: {af_point}", (cx - bw, cy - bh - 15), 
-                            cv2.FONT_HERSHEY_SIMPLEX, max(0.8, w*0.001), (0, 0, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, max(0.8, w * 0.001), (0, 0, 255), 2)
 
-                # เข้ารหัสภาพเป็น Base64 เพื่อส่งกลับไปแสดงผลพรีวิวที่หน้าเว็บ
+                # แปลงเป็น Base64
                 _, buffer = cv2.imencode('.jpg', img_cv)
                 annotated_base64 = base64.b64encode(buffer).decode('utf-8')
 
-            # ประเมินเกณฑ์คุณภาพความคมชัด
             rating = "🔴 เบลอ" if sharpness_score < 100 else "🟡 พอใช้" if sharpness_score < 500 else "🟢 คมชัดดี" if sharpness_score < 1500 else "⭐ ยอดเยี่ยม"
 
             results.append({
