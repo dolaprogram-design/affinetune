@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lens Focus & AF Fine-Tune Analysis</title>
+    <!-- โหลด Tailwind CSS และ ExifReader -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exifreader@4/dist/exif-reader.min.js"></script>
+    <style>
+        .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans text-gray-800">
+    <div class="max-w-5xl mx-auto p-6">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-blue-700 mb-2">ระบบวิเคราะห์ความคมชัดและ EXIF</h1>
+            <p class="text-gray-500">อัปโหลดภาพเพื่อตรวจสอบ Micro-adjustment สำหรับจูนโฟกัสเลนส์</p>
+        </div>
+
+        <!-- ส่วนอัปโหลดไฟล์และแสดงภาพตัวอย่าง -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8 text-center">
+            <label class="block mb-4 text-sm font-semibold text-gray-700">เลือกไฟล์ภาพ (JPG, PNG, RAW/NEF)</label>
+            <input type="file" id="imageInput" accept="image/*,.nef,.cr2,.raw" 
+                   class="block w-full max-w-md mx-auto text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 p-3 mb-4">
+            
+            <div class="flex justify-center">
+                <img id="previewImg" class="hidden max-h-64 object-contain rounded border shadow-sm" alt="Preview">
+            </div>
+        </div>
+
+        <!-- สถานะกำลังโหลด -->
+        <div id="loading" class="hidden flex justify-center items-center my-8">
+            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-10 w-10 mb-4"></div>
+            <span class="ml-4 text-blue-600 font-semibold text-lg">กำลังประมวลผลข้อมูล...</span>
+        </div>
+
+        <!-- ส่วนแจ้งเตือนข้อผิดพลาด -->
+        <div id="errorPanel" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-8">
+            <strong class="font-bold">เกิดข้อผิดพลาด! </strong>
+            <span id="errorMsg" class="block sm:inline"></span>
+        </div>
+
+        <!-- เมนูแสดงผลการทำงาน 4 ส่วนหลัก -->
+        <div id="resultsPanel" class="block">
+            <h2 class="text-xl font-bold text-gray-700 mb-4 border-b pb-2">ผลการวิเคราะห์ 4 ส่วนหลัก</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                
+                <!-- 1. ความคมชัด -->
+                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-blue-500 flex flex-col justify-between">
+                    <p class="text-sm text-gray-500 font-semibold mb-1">1. ความคมชัด (Sharpness)</p>
+                    <p id="resSharpness" class="text-3xl font-bold text-gray-800 text-center my-4">-</p>
+                    <p class="text-xs text-gray-400 text-center">ยิ่งค่าสูง ภาพยิ่งคมชัด</p>
+                </div>
+                
+                <!-- 2. AF Fine Tune -->
+                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-green-500 flex flex-col justify-between">
+                    <p class="text-sm text-gray-500 font-semibold mb-1">2. AF Fine-tune</p>
+                    <p id="resAf" class="text-xl font-bold text-gray-800 text-center my-4">-</p>
+                    <p class="text-xs text-gray-400 text-center">ค่าจูนโฟกัสจาก MakerNote</p>
+                </div>
+
+                <!-- 3. EXIF พื้นฐาน -->
+                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-purple-500 flex flex-col justify-between">
+                    <p class="text-sm text-gray-500 font-semibold mb-1">3. ข้อมูลกล้อง (EXIF)</p>
+                    <div class="mt-2 space-y-2">
+                        <p class="text-sm text-gray-700"><b>รูรับแสง:</b> <span id="resFnum">-</span></p>
+                        <p class="text-sm text-gray-700"><b>ระยะโฟกัส:</b> <span id="resFocal">-</span></p>
+                        <p class="text-sm text-gray-700"><b>ISO:</b> <span id="resIso">-</span></p>
+                    </div>
+                </div>
+
+                <!-- 4. ข้อมูลไฟล์ -->
+                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-gray-500 flex flex-col justify-between">
+                    <p class="text-sm text-gray-500 font-semibold mb-1">4. ข้อมูลไฟล์</p>
+                    <p id="resFilename" class="text-sm font-bold text-gray-800 break-words mt-2">-</p>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('imageInput');
+        const previewImg = document.getElementById('previewImg');
+        const loading = document.getElementById('loading');
+        const errorPanel = document.getElementById('errorPanel');
+        const errorMsg = document.getElementById('errorMsg');
+
+        function resetValues() {
+            document.getElementById('resSharpness').innerText = "-";
+            document.getElementById('resAf').innerText = "-";
+            document.getElementById('resFnum').innerText = "-";
+            document.getElementById('resFocal').innerText = "-";
+            document.getElementById('resIso').innerText = "-";
+            document.getElementById('resFilename').innerText = "-";
+        }
+
+        imageInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            errorPanel.classList.add('hidden');
+            resetValues();
+            loading.classList.remove('hidden');
+
+            if (file.type.startsWith('image/')) {
+                previewImg.src = URL.createObjectURL(file);
+                previewImg.classList.remove('hidden');
+            } else {
+                previewImg.classList.add('hidden');
+            }
+
+            try {
+                // 1. อ่านค่า AF Fine-tune ฝั่ง Frontend ผ่าน ExifReader
+                let afFineTuneValue = "ไม่พบข้อมูล";
+                try {
+                    const tags = await ExifReader.load(file);
+                    if (tags['AFFineTuneAdj']) afFineTuneValue = tags['AFFineTuneAdj'].description;
+                    else if (tags['Microadjustment']) afFineTuneValue = tags['Microadjustment'].description;
+                    else if (tags['AFMicroAdj']) afFineTuneValue = tags['AFMicroAdj'].description;
+                } catch (exifErr) {
+                    console.warn("EXIF Warning:", exifErr);
+                }
+                document.getElementById('resAf').innerText = afFineTuneValue;
+
+                // 2. ส่งไฟล์ไปประมวลผลที่ Backend API (/analyze บน Render)
+                const formData = new FormData();
+                formData.append("file", file);
+
+                const response = await fetch("/analyze", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(`ไม่สามารถเชื่อมต่อ API ได้ (Status: ${response.status}) ${errData.detail || ''}`);
+                }
+
+                const data = await response.json();
+
+                // 3. แสดงผลลัพธ์ลงบนหน้า Dashboard
+                document.getElementById('resFilename').innerText = data.filename || "-";
+                document.getElementById('resSharpness').innerText = data.sharpness_score ? data.sharpness_score.toFixed(2) : "0.00";
+                
+                const exif = data.exif_data || {};
+                document.getElementById('resFnum').innerText = exif.FNumber ? "f/" + exif.FNumber : "-";
+                document.getElementById('resFocal').innerText = exif.FocalLength ? exif.FocalLength : "-";
+                document.getElementById('resIso').innerText = exif.ISO || "-";
+
+            } catch (error) {
+                errorMsg.innerText = error.message;
+                errorPanel.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
