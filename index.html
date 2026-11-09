@@ -11,7 +11,7 @@
         
         <header class="text-center mb-10">
             <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-2">📸 Pro Lens & Camera Batch Analytics</h1>
-            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์ภาพถ่ายชุดทดสอบ (รองรับ JPEG และไฟล์ RAW ของกล้องทุกรุ่น สูงสุด 10 ไฟล์ต่อครั้ง)</p>
+            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์ภาพถ่ายชุดทดสอบ (รองรับ JPEG และ RAW สูงสุด 10 ไฟล์ต่อครั้ง)</p>
         </header>
 
         <!-- Upload Section -->
@@ -21,37 +21,30 @@
             <div class="flex flex-col md:flex-row items-center gap-4">
                 <input type="file" id="filesInput" multiple accept="image/*,.nef,.cr2,.arw,.raw,.dng" 
                        class="block w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-200 rounded-xl bg-slate-50 p-2">
-                <button onclick="uploadAndAnalyze()" class="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-xl transition shadow-sm whitespace-nowrap">
-                    🚀 เริ่มวิเคราะห์ข้อมูล
+                <button onclick="processFilesSequentially()" id="analyzeBtn" class="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-xl transition shadow-sm whitespace-nowrap">
+                    🚀 เริ่มประมวลผลข้อมูล
                 </button>
             </div>
         </section>
 
-        <!-- Loading -->
-        <div id="loading" class="hidden text-center my-12">
-            <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-indigo-500 border-t-transparent"></div>
-            <p class="text-indigo-600 font-semibold mt-3">กำลังสกัด MakerNotes และวิเคราะห์ภาพถ่าย (RAW / JPEG)...</p>
-        </div>
-
         <!-- Results Table Report -->
         <section id="reportSection" class="hidden space-y-6">
-            <h2 class="text-xl font-bold text-slate-800 border-b pb-3">📊 รายงานสรุปผลวิเคราะห์พารามิเตอร์และจุดโฟกัส</h2>
+            <div class="flex justify-between items-end border-b pb-3">
+                <h2 class="text-xl font-bold text-slate-800">📊 สถานะการประมวลผลและรายงาน</h2>
+                <span id="overallStatus" class="text-sm font-semibold text-indigo-600">กำลังเตรียมข้อมูล...</span>
+            </div>
             
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
-                                <th class="p-4">ชื่อไฟล์</th>
-                                <th class="p-4">กล้อง & เลนส์</th>
-                                <th class="p-4">ความคมชัด (Sharpness)</th>
-                                <th class="p-4">AF Fine-tune</th>
-                                <th class="p-4">ค่าทางเทคนิค (ISO / F / Focal)</th>
-                                <th class="p-4 text-center">ภาพพรีวิวพร้อมจุดโฟกัส</th>
+                                <th class="p-4 w-1/4">ชื่อไฟล์</th>
+                                <th class="p-4 w-3/4" id="dynamicHeaders" colspan="5">สถานะ</th>
                             </tr>
                         </thead>
                         <tbody id="reportTableBody" class="divide-y divide-slate-200 text-sm">
-                            <!-- Injected by JavaScript -->
+                            <!-- แถวสถานะจะถูกสร้างผ่าน JavaScript ทันทีที่กดปุ่ม -->
                         </tbody>
                     </table>
                 </div>
@@ -60,7 +53,7 @@
 
     </div>
 
-    <!-- Modal สำหรับแสดงภาพขยายพร้อมจุดโฟกัส -->
+    <!-- Modal สำหรับภาพจุดโฟกัส -->
     <div id="imageModal" class="hidden fixed inset-0 bg-black/70 flex justify-center items-center p-4 z-50">
         <div class="bg-white rounded-2xl max-w-3xl w-full p-6 relative shadow-2xl">
             <button onclick="closeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold text-xl">✕</button>
@@ -72,84 +65,139 @@
     </div>
 
     <script>
-        async function uploadAndAnalyze() {
+        async function processFilesSequentially() {
             const fileInput = document.getElementById('filesInput');
-            if (fileInput.files.length === 0) {
+            const files = fileInput.files;
+            const btn = document.getElementById('analyzeBtn');
+
+            if (files.length === 0) {
                 alert("กรุณาเลือกไฟล์ภาพอย่างน้อย 1 ไฟล์");
                 return;
             }
-            if (fileInput.files.length > 10) {
+            if (files.length > 10) {
                 alert("จำกัดให้อัปโหลดได้ไม่เกิน 10 ไฟล์ต่อครั้งครับ");
                 return;
             }
 
-            const formData = new FormData();
-            for (let file of fileInput.files) {
-                formData.append("files", file);
-            }
+            // ล็อกปุ่ม
+            btn.disabled = true;
+            btn.innerText = "⏳ กำลังประมวลผล...";
+            btn.classList.replace('bg-indigo-600', 'bg-slate-400');
 
-            document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('reportSection').classList.add('hidden');
-
-            try {
-                const response = await fetch("/analyze-batch", {
-                    method: "POST",
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    const err = await response.json().catch(() => ({}));
-                    throw new Error(err.detail || "เกิดข้อผิดพลาดในการประมวลผล");
-                }
-
-                const data = await response.json();
-                renderTable(data.results);
-            } catch (err) {
-                alert(err.message);
-            } finally {
-                document.getElementById('loading').classList.add('hidden');
-            }
-        }
-
-        function renderTable(results) {
+            // แสดงหน้าตาราง
             const tbody = document.getElementById('reportTableBody');
             tbody.innerHTML = "";
+            document.getElementById('reportSection').classList.remove('hidden');
+            document.getElementById('overallStatus').innerText = `กำลังประมวลผล 0 / ${files.length} ไฟล์`;
 
-            results.forEach(item => {
-                if (item.error) return;
-
+            // 1. สร้างตารางรอคิว (Queuing UI) ก่อนล่วงหน้า
+            for (let i = 0; i < files.length; i++) {
                 const tr = document.createElement('tr');
-                tr.className = "hover:bg-slate-50 transition";
+                tr.id = `row-${i}`;
+                tr.className = "bg-white transition duration-300";
                 tr.innerHTML = `
-                    <td class="p-4 font-semibold text-slate-900">${item.filename}</td>
-                    <td class="p-4">
-                        <div class="font-medium text-slate-800">${item.camera_model}</div>
-                        <div class="text-xs text-slate-400 truncate max-w-[200px]" title="${item.lens}">${item.lens}</div>
-                    </td>
-                    <td class="p-4">
-                        <span class="font-bold text-indigo-600 text-base">${item.sharpness}</span>
-                        <div class="text-xs text-slate-500">${item.quality}</div>
-                    </td>
-                    <td class="p-4 font-medium text-emerald-600">${item.af_fine_tune} <span class="text-xs text-slate-400">(${item.af_status})</span></td>
-                    <td class="p-4 text-xs text-slate-600 space-y-0.5">
-                        <div><b>ISO:</b> ${item.iso}</div>
-                        <div><b>F-Number:</b> f/${item.f_number}</div>
-                        <div><b>Focal:</b> ${item.focal_length}mm</div>
-                        <div><b>AF Point:</b> ${item.af_point}</div>
-                    </td>
-                    <td class="p-4 text-center">
-                        ${item.annotated_image ? `<button onclick="openModal('${item.annotated_image}', '${item.filename}')" class="bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-indigo-100 transition shadow-sm">🔍 ดูภาพจุดโฟกัส</button>` : 'N/A'}
+                    <td class="p-4 font-semibold text-slate-700 truncate max-w-[150px]">${files[i].name}</td>
+                    <td class="p-4 text-slate-400 font-medium" colspan="5">
+                        <span class="inline-flex items-center">
+                            ⏳ รอคิวประมวลผล...
+                        </span>
                     </td>
                 `;
                 tbody.appendChild(tr);
-            });
+            }
 
-            document.getElementById('reportSection').classList.remove('hidden');
+            // 2. ทยอยส่งข้อมูลไปหลังบ้านทีละไฟล์ 
+            for (let i = 0; i < files.length; i++) {
+                const tr = document.getElementById(`row-${i}`);
+                
+                // อัปเดตสถานะเป็นกำลังทำงาน
+                tr.cells[1].innerHTML = `
+                    <span class="inline-flex items-center text-amber-600 font-bold">
+                        <svg class="animate-spin -ml-1 mr-3 h-4 w-4 text-amber-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        กำลังอัปโหลดและสกัดข้อมูล (ExifTool / OpenCV)...
+                    </span>
+                `;
+                tr.classList.add('bg-amber-50');
+
+                const formData = new FormData();
+                formData.append("file", files[i]);
+
+                try {
+                    const response = await fetch("/analyze-file", {
+                        method: "POST",
+                        body: formData
+                    });
+
+                    if (!response.ok) throw new Error("เกิดข้อผิดพลาดจากเซิร์ฟเวอร์");
+
+                    const data = await response.json();
+                    const item = data.result;
+
+                    // ปรับโครงสร้างส่วนหัวตารางเมื่อไฟล์แรกเสร็จ
+                    if (i === 0) {
+                        document.getElementById('dynamicHeaders').outerHTML = `
+                            <th class="p-4">กล้อง & เลนส์</th>
+                            <th class="p-4">ความคมชัด (Sharpness)</th>
+                            <th class="p-4">AF Fine-tune</th>
+                            <th class="p-4">เทคนิค (ISO/F/Focal)</th>
+                            <th class="p-4 text-center">ภาพพรีวิว (AF Point)</th>
+                        `;
+                    }
+
+                    // ลบสีพื้นหลังกำลังโหลดออก
+                    tr.classList.remove('bg-amber-50');
+                    tr.classList.add('hover:bg-slate-50');
+
+                    if (item.error) {
+                        tr.innerHTML = `
+                            <td class="p-4 font-semibold text-rose-600">${files[i].name}</td>
+                            <td class="p-4 text-rose-600 font-medium" colspan="5">❌ ประมวลผลล้มเหลว: ${item.error}</td>
+                        `;
+                    } else {
+                        // อัปเดตข้อมูลไฟล์ที่เสร็จสมบูรณ์ลงในแถว
+                        tr.innerHTML = `
+                            <td class="p-4 font-semibold text-slate-900 break-words max-w-[150px]">${item.filename}</td>
+                            <td class="p-4">
+                                <div class="font-bold text-slate-800">${item.camera_model}</div>
+                                <div class="text-[11px] text-slate-500 truncate max-w-[150px]" title="${item.lens}">${item.lens}</div>
+                            </td>
+                            <td class="p-4">
+                                <span class="font-black text-indigo-600 text-lg">${item.sharpness}</span>
+                                <div class="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">${item.quality}</div>
+                            </td>
+                            <td class="p-4 font-bold text-emerald-600">${item.af_fine_tune} <br><span class="text-xs font-normal text-slate-400">(${item.af_status})</span></td>
+                            <td class="p-4 text-xs text-slate-600 leading-relaxed">
+                                <b>ISO:</b> ${item.iso}<br>
+                                <b>F-Num:</b> f/${item.f_number}<br>
+                                <b>Focal:</b> ${item.focal_length}mm<br>
+                                <b>AF:</b> <span class="text-indigo-500">${item.af_point}</span>
+                            </td>
+                            <td class="p-4 text-center">
+                                ${item.annotated_image ? `<button onclick="openModal('${item.annotated_image}', '${item.filename}')" class="bg-slate-800 text-white px-3 py-2 rounded-xl text-[11px] font-semibold hover:bg-slate-700 transition shadow-md w-full">🔍 ดูภาพจำลอง</button>` : '<span class="text-slate-300 text-xs">ไม่พบรูปภาพ</span>'}
+                            </td>
+                        `;
+                    }
+                } catch (err) {
+                    tr.classList.remove('bg-amber-50');
+                    tr.innerHTML = `
+                        <td class="p-4 font-semibold text-rose-600">${files[i].name}</td>
+                        <td class="p-4 text-rose-600 font-medium" colspan="5">❌ ขัดข้อง: ${err.message}</td>
+                    `;
+                }
+
+                document.getElementById('overallStatus').innerText = `กำลังประมวลผล ${i + 1} / ${files.length} ไฟล์`;
+            }
+
+            // คืนค่าปุ่มให้ใช้งานได้อีกครั้ง
+            document.getElementById('overallStatus').innerText = `✅ ประมวลผลเสร็จสมบูรณ์ทั้ง ${files.length} ไฟล์`;
+            btn.disabled = false;
+            btn.innerText = "🚀 เริ่มประมวลผลข้อมูลใหม่";
+            btn.classList.replace('bg-slate-400', 'bg-indigo-600');
         }
 
         function openModal(imgSrc, filename) {
             document.getElementById('modalImg').src = imgSrc;
-            document.getElementById('modalTitle').innerText = `ภาพตัวอย่างจุดโฟกัส: ${filename}`;
+            document.getElementById('modalTitle').innerText = `จำลองจุดโฟกัส (AF Point): ${filename}`;
             document.getElementById('imageModal').classList.remove('hidden');
         }
 
