@@ -35,6 +35,7 @@ async def analyze_file(file: UploadFile = File(...)):
         temp_path = temp.name
 
     try:
+        # 1. ใช้ ExifTool ดึงข้อมูล EXIF และ MakerNotes
         cmd = ['exiftool', '-j', temp_path]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
         exif_data = {}
@@ -56,18 +57,22 @@ async def analyze_file(file: UploadFile = File(...)):
         sharpness_score = 0.0
         img_cv = None
         
-        if file.filename.lower().endswith(('.nef', '.cr2', '.arw', '.raw', '.dng')):
-            cmd_img = ['exiftool', '-b', '-JpgFromRaw', temp_path]
-            res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
-            if not res_img.stdout:
-                cmd_img = ['exiftool', '-b', '-PreviewImage', temp_path]
+        # 2. จัดการเปิดภาพ (รองรับทั้ง JPEG และ RAW แบบปลอดภัยไม่ให้เซิร์ฟเวอร์ล่ม)
+        try:
+            if file.filename.lower().endswith(('.nef', '.cr2', '.arw', '.raw', '.dng')):
+                cmd_img = ['exiftool', '-b', '-JpgFromRaw', temp_path]
                 res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
-            
-            if res_img.stdout:
-                nparr = np.frombuffer(res_img.stdout, np.uint8)
-                img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        else:
-            img_cv = cv2.imread(temp_path, cv2.IMREAD_COLOR)
+                if not res_img.stdout:
+                    cmd_img = ['exiftool', '-b', '-PreviewImage', temp_path]
+                    res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
+                
+                if res_img.stdout:
+                    nparr = np.frombuffer(res_img.stdout, np.uint8)
+                    img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            else:
+                img_cv = cv2.imread(temp_path, cv2.IMREAD_COLOR)
+        except Exception as img_err:
+            print(f"Warning: Image decode skipped for {file.filename}: {img_err}")
 
         annotated_base64 = ""
         if img_cv is not None:
@@ -84,19 +89,22 @@ async def analyze_file(file: UploadFile = File(...)):
             _, buffer = cv2.imencode('.jpg', img_cv)
             annotated_base64 = base64.b64encode(buffer).decode('utf-8')
 
-        # จัดกลุ่มระดับความคมชัดและคำอธิบาย (Synthesized Data)
-        if sharpness_score < 100:
+        # 3. ประเมินคุณภาพและความคมชัด
+        if sharpness_score == 0.0:
+            quality = "⚠️ ไม่สามารถประเมินภาพได้"
+            advice = "อ่านข้อมูล MakerNotes และ EXIF สำเร็จ แต่ไม่พบภาพพรีวิวสำหรับคำนวณความคมชัด"
+        elif sharpness_score < 100:
             quality = "🔴 แย่มาก (เบลอหนัก/หลุดโฟกัส)"
-            advice = "ความคมชัดต่ำมาก อาจเกิดจากมือสั่น, ชัตเตอร์ช้าเกินไป, หรือหลุดโฟกัสโดยสิ้นเชิง"
+            advice = "ความคมชัดต่ำมาก อาจเกิดจากมือสั่น หรือหลุดโฟกัสโดยสิ้นเชิง"
         elif sharpness_score < 500:
             quality = "🟡 พอใช้ (ภาพมีอาการซอฟต์)"
-            advice = "ภาพยังมีความซอฟต์ อาจเกิดจากการตั้งค่ารูรับแสงกว้างสุด (F-stop ต่ำ) หรือเลนส์มีอาการ Front/Back Focus เล็กน้อย"
+            advice = "ภาพมีความซอฟต์ อาจเกิดจากการตั้งค่ารูรับแสงกว้างสุด หรือมีอาการ Front/Back Focus เล็กน้อย"
         elif sharpness_score < 1500:
             quality = "🟢 ดี (คมชัดมาตรฐาน)"
-            advice = "ความคมชัดอยู่ในเกณฑ์มาตรฐานใช้งานได้ดี ระบบโฟกัสและชัตเตอร์ทำงานสอดคล้องกัน"
+            advice = "ความคมชัดอยู่ในเกณฑ์มาตรฐานใช้งานได้ดี"
         else:
             quality = "⭐ ยอดเยี่ยม (คมกริบ)"
-            advice = "ภาพคมกริบระดับมืออาชีพ ชัตเตอร์สัมพันธ์กับทางยาวโฟกัสและค่า F-stop เหมาะสม (Sweet Spot)"
+            advice = "ภาพคมกริบระดับมืออาชีพ ชัตเตอร์สัมพันธ์กับทางยาวโฟกัสและค่า F-stop เหมาะสม"
 
         result_data = {
             "filename": file.filename,
@@ -105,18 +113,19 @@ async def analyze_file(file: UploadFile = File(...)):
             "sharpness": round(sharpness_score, 2),
             "quality": quality,
             "advice": advice,
-            "iso": iso,
-            "f_number": f_number,
-            "focal_length": focal_length,
-            "exposure_time": exposure_time,
-            "af_fine_tune": af_fine_tune,
-            "af_status": af_status,
-            "af_point": af_point,
+            "iso": str(iso),
+            "f_number": str(f_number),
+            "focal_length": str(focal_length),
+            "exposure_time": str(exposure_time),
+            "af_fine_tune": str(af_fine_tune),
+            "af_status": str(af_status),
+            "af_point": str(af_point),
             "annotated_image": f"data:image/jpeg;base64,{annotated_base64}" if annotated_base64 else ""
         }
         return JSONResponse(content={"result": result_data})
 
     except Exception as e:
+        # ส่งค่า Error กลับไปแสดงผลแบบละมุนแทนการล่ม 502
         return JSONResponse(content={"result": {"filename": file.filename, "error": str(e)}})
     finally:
         if os.path.exists(temp_path):
