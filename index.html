@@ -1,148 +1,375 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import cv2
-import numpy as np
-import subprocess
-import json
-import os
-import tempfile
-import base64
-import shutil
-
-app = FastAPI(title="Pro Lens & Camera Analytics Engine")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/", response_class=HTMLResponse)
-def read_root():
-    try:
-        with open("index.html", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "<h3>ไม่พบไฟล์ index.html กรุณาอัปโหลดขึ้นระบบ</h3>"
-
-@app.post("/analyze-file")
-async def analyze_file(file: UploadFile = File(...)):
-    # 1. บันทึกไฟล์ต้นฉบับลงพื้นที่ชั่วคราว
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp:
-        shutil.copyfileobj(file.file, temp)
-        temp_path = temp.name
-
-    try:
-        # 2. ดึงข้อมูลพารามิเตอร์ EXIF และ MakerNotes ด้วย ExifTool
-        cmd = ['exiftool', '-j', temp_path]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-        exif_data = {}
-        if res.returncode == 0 and res.stdout:
-            exif_list = json.loads(res.stdout)
-            if exif_list:
-                exif_data = exif_list[0]
-
-        camera_model = exif_data.get('Model', 'N/A')
-        iso = exif_data.get('ISO', exif_data.get('ISOSpeedRatings', 'N/A'))
-        f_number = exif_data.get('FNumber', 'N/A')
-        focal_length = exif_data.get('FocalLength', 'N/A')
-        exposure_time = exif_data.get('ExposureTime', 'N/A')
-        af_fine_tune = exif_data.get('AFFineTuneAdj', exif_data.get('AFMicroAdj', 'N/A'))
-        af_status = exif_data.get('AFFineTune', 'Off')
-        af_point = exif_data.get('PrimaryAFPoint', exif_data.get('AFPointsUsed', 'Center Focus'))
-        lens_info = exif_data.get('LensID', exif_data.get('Lens', 'N/A'))
-
-        # 3. ระบบแปลงไฟล์ RAW เป็น JPEG ขนาดเหมาะสม (Proxy Generation) เพื่อป้องกันแรมเต็ม
-        img_cv = None
-        try:
-            is_raw = file.filename.lower().endswith(('.nef', '.cr2', '.arw', '.raw', '.dng'))
-            
-            if is_raw:
-                # สกัดภาพพรีวิวคุณภาพสูงจากไฟล์ RAW ผ่าน ExifTool โดยไม่โหลดโครงสร้าง RAW ทั้งหมดเข้า RAM
-                cmd_img = ['exiftool', '-b', '-JpgFromRaw', temp_path]
-                res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
-                if not res_img.stdout:
-                    cmd_img = ['exiftool', '-b', '-PreviewImage', temp_path]
-                    res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
-                
-                if res_img.stdout:
-                    nparr = np.frombuffer(res_img.stdout, np.uint8)
-                    img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if img_cv is None:
-                # กรณีเป็นไฟล์ภาพปกติ (JPG/PNG) หรือหาก RAW ไม่มีพรีวิว ให้โหลดตรง
-                img_cv = cv2.imread(temp_path, cv2.IMREAD_COLOR)
-
-        except Exception as parse_err:
-            print(f"Extraction warning for {file.filename}: {parse_err}")
-
-        # 4. ประมวลผลภาพ, ย่อขนาด และคำนวณความคมชัดอย่างปลอดภัย
-        sharpness_score = 0.0
-        annotated_base64 = ""
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Lens & Camera Analytics Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+    <div class="max-w-7xl mx-auto p-6 md:p-10">
         
-        if img_cv is not None:
-            h, w = img_cv.shape[:2]
-            
-            # ย่อขนาดภาพให้เหลือความกว้างไม่เกิน 1,200 พิกเซล (ขนาดกำลังดีสำหรับการแสดงผลและไม่รบกวนหน่วยความจำ)
-            if w > 1200:
-                scale = 1200 / w
-                img_cv = cv2.resize(img_cv, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-2">📸 Pro Lens & Camera Analytics Dashboard</h1>
+            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์คุณภาพภาพถ่ายและเปรียบเทียบพารามิเตอร์กล้องเชิงลึก พร้อมองค์ความรู้ทางวิชาการการถ่ายภาพ</p>
+        </header>
 
-            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-            sharpness_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        <!-- Tab Navigation Menu -->
+        <div class="flex justify-center space-x-4 mb-8">
+            <button onclick="switchTab('uploadTab')" id="btnUploadTab" class="px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition">1. รายงานและภาพขนาดย่อ</button>
+            <button onclick="switchTab('analyticsTab')" id="btnAnalyticsTab" class="px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition">2. กราฟวิเคราะห์และความเห็นเชิงวิชาการ</button>
+        </div>
 
-            # วาดกรอบจุดโฟกัสจำลอง (AF Point Visualization) ลงบนภาพพรีวิวที่แปลงแล้ว
-            ph, pw, _ = img_cv.shape
-            cx, cy = pw // 2, ph // 2
-            bw, bh = int(pw * 0.08), int(ph * 0.08)
-            cv2.rectangle(img_cv, (cx - bw, cy - bh), (cx + bw, cy + bh), (0, 0, 255), max(3, int(pw*0.004)))
-            cv2.putText(img_cv, f"AF: {af_point}", (cx - bw, cy - bh - 15), 
-                        cv2.FONT_HERSHEY_SIMPLEX, max(0.6, pw*0.001), (0, 0, 255), 2)
+        <!-- TAB 1: อัปโหลดและจัดการรายการไฟล์ -->
+        <section id="uploadTab" class="space-y-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-lg font-bold text-slate-700 mb-2">📁 เลือกไฟล์ภาพ (เลือกสะสมจากหลายโฟลเดอร์ได้อิสระ)</h2>
+                <p class="text-xs text-slate-400 mb-4">รองรับไฟล์ .NEF, .CR2, .ARW, .JPG, .PNG (ระบบจัดสรรขนาดไฟล์อัตโนมัติ ป้องกันแรมเซิร์ฟเวอร์เต็ม)</p>
+                
+                <div class="flex flex-col md:flex-row items-center gap-4">
+                    <input type="file" id="filesInput" multiple accept="image/*,.nef,.cr2,.arw,.raw,.dng" 
+                           class="block w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-200 rounded-xl bg-slate-50 p-2">
+                    <button onclick="clearFiles()" class="w-full md:w-auto bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-3 px-6 rounded-xl transition whitespace-nowrap">
+                        🗑️ ล้างรายการทั้งหมด
+                    </button>
+                </div>
+            </div>
 
-            # แปลงภาพพรีวิวเป็น JPEG Base64 (ตั้งค่าความคมชัด JPEG Quality 75 เพื่อลดขนาดข้อมูลรับส่ง)
-            _, buffer = cv2.imencode('.jpg', img_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-            annotated_base64 = base64.b64encode(buffer).decode('utf-8')
+            <!-- รายการไฟล์ที่ถูกสะสมไว้รอดำเนินการ -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <h3 class="font-bold text-slate-700">📋 รายการไฟล์รอดำเนินการ (<span id="fileCount">0</span> ไฟล์)</h3>
+                        <p id="memoryNotice" class="text-xs text-indigo-600 mt-0.5">ระบบปลอดภัย: ประมวลผลเรียงลำดับตามคิวเพื่อรักษาหน่วยความจำเซิร์ฟเวอร์</p>
+                    </div>
+                    <button onclick="startSmartBatchAnalysis()" id="analyzeBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-xl transition shadow-sm text-sm disabled:bg-slate-300 disabled:cursor-not-allowed" disabled>
+                        🚀 เริ่มวิเคราะห์ภาพทั้งหมดทีเดียว
+                    </button>
+                </div>
+                <div id="selectedFilesList" class="text-sm text-slate-500 bg-slate-50 p-4 rounded-xl border border-slate-100 min-h-[80px] flex items-center justify-center">
+                    ยังไม่มีไฟล์ในรายการ กรุณาเลือกไฟล์ภาพจากช่องด้านบน
+                </div>
+            </div>
 
-        # 5. สังเคราะห์คำอธิบายเกณฑ์ความคมชัด
-        if sharpness_score == 0.0:
-            quality = "⚠️ อ่านค่า EXIF สำเร็จ (ไม่พบพรีวิวภาพ)"
-            advice = "ดึงข้อมูลการตั้งค่ากล้องและค่าจูนเลนส์สำเร็จ แต่ไฟล์นี้ไม่มีพรีวิวภาพสำหรับคำนวณความคมชัด"
-        elif sharpness_score < 100:
-            quality = "🔴 แย่มาก (เบลอหนัก/หลุดโฟกัส)"
-            advice = "ความคมชัดต่ำมาก อาจเกิดจากมือสั่น หรือหลุดโฟกัสโดยสิ้นเชิง"
-        elif sharpness_score < 500:
-            quality = "🟡 พอใช้ (ภาพมีอาการซอฟต์)"
-            advice = "ภาพมีความซอฟต์ อาจเกิดจากการเปิดรูรับแสงกว้างสุด หรือมีอาการ Front/Back Focus เล็กน้อย"
-        elif sharpness_score < 1500:
-            quality = "🟢 ดี (คมชัดมาตรฐาน)"
-            advice = "ความคมชัดอยู่ในเกณฑ์มาตรฐานใช้งานได้ดี ระบบโฟกัสและชัตเตอร์ทำงานสอดคล้องกัน"
-        else:
-            quality = "⭐ ยอดเยี่ยม (คมกริบ)"
-            advice = "ภาพคมกริบระดับมืออาชีพ ชัตเตอร์สัมพันธ์กับทางยาวโฟกัสและค่า F-stop เหมาะสม"
+            <!-- ผลลัพธ์การวิเคราะห์และตารางรายงาน -->
+            <div id="reportSection" class="hidden space-y-6">
+                <div class="flex justify-between items-end border-b pb-3">
+                    <h2 class="text-xl font-bold text-slate-800">📊 รายงานสรุปผลวิเคราะห์พารามิเตอร์และความคมชัด</h2>
+                    <span id="overallStatus" class="text-sm font-semibold text-indigo-600">กำลังประมวลผลตามคิว...</span>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
+                                    <th class="p-4 w-1/4">ภาพขนาดย่อ & ชื่อไฟล์</th>
+                                    <th class="p-4 w-1/4">การตั้งค่ากล้อง (EXIF)</th>
+                                    <th class="p-4 w-1/3">ความคมชัด & คำวินิจฉัย</th>
+                                    <th class="p-4 w-1/6 text-center">พิกัดจุดโฟกัส</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reportTableBody" class="divide-y divide-slate-200 text-sm">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-        result_data = {
-            "filename": file.filename,
-            "camera_model": camera_model,
-            "lens": lens_info,
-            "sharpness": round(sharpness_score, 2),
-            "quality": quality,
-            "advice": advice,
-            "iso": str(iso),
-            "f_number": str(f_number),
-            "focal_length": str(focal_length),
-            "exposure_time": str(exposure_time),
-            "af_fine_tune": str(af_fine_tune),
-            "af_status": str(af_status),
-            "af_point": str(af_point),
-            "annotated_image": f"data:image/jpeg;base64,{annotated_base64}" if annotated_base64 else ""
+                <!-- ส่วนเพิ่มเติม: คำอธิบายและข้อเสนอแนะเชิงวิชาการท้ายตาราง -->
+                <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-6 rounded-2xl shadow-md space-y-4">
+                    <h3 class="text-base font-bold text-indigo-300 flex items-center gap-2">
+                        <span>💡</span> สรุปข้อเสนอแนะและข้อสังเกตเชิงวิชาการท้ายรายงาน
+                    </h3>
+                    <div id="tableSummaryAdvice" class="text-xs md:text-sm text-slate-300 leading-relaxed space-y-2">
+                        กรุณารอผลการวิเคราะห์ชุดภาพ เพื่อแสดงสรุปคำแนะนำเชิงลึกสำหรับการปรับตั้งค่าเลนส์และกล้อง
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: กราฟวิเคราะห์ความสัมพันธ์และองค์ความรู้ -->
+        <section id="analyticsTab" class="hidden space-y-8">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                <h2 class="text-lg font-bold text-slate-700">📈 กราฟเปรียบเทียบปัจจัยการตั้งค่ากล้องกับความคมชัด พร้อมคำอธิบายเชิงวิชาการ</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- กราฟที่ 1: ISO -->
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
+                        <h3 class="text-sm font-bold text-slate-800 text-center">1. ความไวแสง (ISO) vs ความคมชัด</h3>
+                        <canvas id="chartISO"></canvas>
+                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ค่า ISO สูงเกินไปจะทำให้เกิดสัญญาณรบกวน (Noise) และลด Dynamic Range ซึ่งอัลกอริทึม Laplacian จะอ่าน Noise เหล่านี้เป็นขอบภาพเทียมหรือลดทอนความเนียน ทำให้คะแนนความคมชัดดรอปลง ควรใช้ ISO ต่ำที่สุดเท่าที่สภาพแสงเอื้ออำนวย
+                        </p>
+                    </div>
+
+                    <!-- กราฟที่ 2: Focal Length -->
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
+                        <h3 class="text-sm font-bold text-slate-800 text-center">2. ทางยาวโฟกัส (Focal Length) vs ความคมชัด</h3>
+                        <canvas id="chartFocal"></canvas>
+                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> เลนส์ซูมส่วนใหญ่จะมีช่วง "Sweet Spot" ที่ให้ความคมชัดสูงที่สุด (มักจะอยู่ช่วงกลางๆ ของช่วงซูม) การซูมสุดช่วง (Telephoto/Wide สุดขีด) มักมีความคมชัดลดลงเล็กน้อยที่ขอบและกลางภาพ
+                        </p>
+                    </div>
+
+                    <!-- กราฟที่ 3: Shutter Speed -->
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
+                        <h3 class="text-sm font-bold text-slate-800 text-center">3. ความเร็วชัตเตอร์ (Shutter Speed) vs ความคมชัด</h3>
+                        <canvas id="chartShutter"></canvas>
+                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> ชัตเตอร์สปีดที่ช้าเกินไปจะเกิดอาการมือสั่น (Camera Shake) ตามกฎ Reciprocal Rule ความเร็วชัตเตอร์ขั้นต่ำควรเป็น 1 / ทางยาวโฟกัส (เช่น ใช้เลนส์ 50mm ชัตเตอร์ไม่ควรต่ำกว่า 1/50 วินาที เว้นแต่มีระบบกันสั่น)
+                        </p>
+                    </div>
+
+                    <!-- กราฟที่ 4: F-Number -->
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
+                        <h3 class="text-sm font-bold text-slate-800 text-center">4. รูรับแสง (F-Number) vs ความคมชัด</h3>
+                        <canvas id="chartFNumber"></canvas>
+                        <p class="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
+                            <b><span class="text-indigo-600">ความเห็นทางวิชาการ:</span></b> การเปิดรูรับแสงกว้างสุด (เช่น f/1.4 - f/2.8) มักทำให้ภาพมีความคมชัดลดลงเล็กน้อยและเกิดอาการ Vignetting การหรี่รูรับแสงมาที่ช่วง f/4 - f/8 จะเป็นจุดที่คมชัดที่สุด (Sweet Spot ของเลนส์) แต่หากแคบเกินไป (เช่น f/22) จะเกิดการหักเหของแสง (Diffraction) ทำให้ภาพเบลอลงได้
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Modal สำหรับดูภาพพรีวิวพร้อมจุดโฟกัส -->
+    <div id="imageModal" class="hidden fixed inset-0 bg-black/70 flex justify-center items-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-4xl w-full p-6 relative shadow-2xl flex flex-col md:flex-row gap-6">
+            <button onclick="closeModal()" class="absolute top-2 right-4 text-slate-400 hover:text-slate-700 font-bold text-2xl">✕</button>
+            <div class="md:w-2/3 flex justify-center bg-slate-900 rounded-xl p-2">
+                <img id="modalImg" class="max-h-[60vh] object-contain rounded-lg" src="" alt="Annotated AF">
+            </div>
+            <div class="md:w-1/3 flex flex-col justify-center">
+                <h3 class="text-lg font-bold text-indigo-700 mb-2 border-b pb-2">คำอธิบายระบบโฟกัส</h3>
+                <p id="modalAfPoint" class="text-sm font-semibold text-slate-800 mb-2"></p>
+                <p id="modalAdvice" class="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg border border-emerald-100 leading-relaxed"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let accumulatedFiles = [];
+        let analyzedResults = [];
+
+        const filesInput = document.getElementById('filesInput');
+        filesInput.addEventListener('change', (e) => {
+            const newFiles = Array.from(e.target.files);
+            newFiles.forEach(file => {
+                if (!accumulatedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                    accumulatedFiles.push(file);
+                }
+            });
+            accumulatedFiles.sort((a, b) => a.size - b.size);
+            updateFilesListUI();
+            filesInput.value = "";
+        });
+
+        function updateFilesListUI() {
+            const listContainer = document.getElementById('selectedFilesList');
+            const fileCountEl = document.getElementById('fileCount');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+
+            fileCountEl.innerText = accumulatedFiles.length;
+
+            if (accumulatedFiles.length === 0) {
+                listContainer.innerHTML = "ยังไม่มีไฟล์ในรายการ กรุณาเลือกไฟล์ภาพจากช่องด้านบน";
+                analyzeBtn.disabled = true;
+                return;
+            }
+
+            analyzeBtn.disabled = false;
+            let html = '<div class="flex flex-wrap gap-2 w-full max-h-40 overflow-y-auto p-1">';
+            accumulatedFiles.forEach((f, idx) => {
+                let sizeMb = (f.size / (1024 * 1024)).toFixed(1);
+                html += `<div class="bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-2">
+                    <span>${f.name} (${sizeMb} MB)</span>
+                    <button onclick="removeFile(${idx})" class="text-rose-500 font-bold hover:text-rose-700">✕</button>
+                </div>`;
+            });
+            html += '</div>';
+            listContainer.innerHTML = html;
         }
-        return JSONResponse(content={"result": result_data})
 
-    except Exception as e:
-        return JSONResponse(content={"result": {"filename": file.filename, "error": f"ประมวลผลไม่สำเร็จ ({str(e)})"}})
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        function removeFile(index) {
+            accumulatedFiles.splice(index, 1);
+            updateFilesListUI();
+        }
+
+        function clearFiles() {
+            accumulatedFiles = [];
+            updateFilesListUI();
+            document.getElementById('reportSection').classList.add('hidden');
+        }
+
+        function switchTab(tabId) {
+            const uploadTab = document.getElementById('uploadTab');
+            const analyticsTab = document.getElementById('analyticsTab');
+            const btnUpload = document.getElementById('btnUploadTab');
+            const btnAnalytics = document.getElementById('btnAnalyticsTab');
+
+            if (tabId === 'uploadTab') {
+                uploadTab.classList.remove('hidden');
+                analyticsTab.classList.add('hidden');
+                btnUpload.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
+                btnAnalytics.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
+            } else {
+                uploadTab.classList.add('hidden');
+                analyticsTab.classList.remove('hidden');
+                btnAnalytics.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-sm transition";
+                btnUpload.className = "px-6 py-2.5 rounded-xl font-bold text-sm bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition";
+                renderAnalyticsCharts();
+            }
+        }
+
+        async function startSmartBatchAnalysis() {
+            if (accumulatedFiles.length === 0) return;
+
+            const btn = document.getElementById('analyzeBtn');
+            btn.disabled = true;
+            btn.innerText = "⏳ กำลังประมวลผลตามคิว...";
+
+            const tbody = document.getElementById('reportTableBody');
+            tbody.innerHTML = "";
+            document.getElementById('reportSection').classList.remove('hidden');
+            analyzedResults = [];
+
+            for (let i = 0; i < accumulatedFiles.length; i++) {
+                const tr = document.createElement('tr');
+                tr.id = `row-${i}`;
+                tr.className = "bg-white transition";
+                let sizeMb = (accumulatedFiles[i].size / (1024 * 1024)).toFixed(1);
+                tr.innerHTML = `
+                    <td class="p-4 font-semibold text-slate-700 flex items-center gap-3">
+                        <div class="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 text-xs border">⏳</div>
+                        <div>${accumulatedFiles[i].name}<br><span class="text-xs text-slate-400">${sizeMb} MB</span></div>
+                    </td>
+                    <td class="p-4 text-slate-400" colspan="3">รอคิวประมวลผล...</td>
+                `;
+                tbody.appendChild(tr);
+            }
+
+            for (let i = 0; i < accumulatedFiles.length; i++) {
+                const tr = document.getElementById(`row-${i}`);
+                tr.classList.add('bg-amber-50');
+
+                const formData = new FormData();
+                formData.append("file", accumulatedFiles[i]);
+
+                try {
+                    const response = await fetch("/analyze-file", { method: "POST", body: formData });
+                    if (!response.ok) throw new Error("Server error");
+                    const data = await response.json();
+                    const item = data.result;
+
+                    if (!item.error) {
+                        analyzedResults.push(item);
+                    }
+
+                    tr.classList.remove('bg-amber-50');
+                    if (item.error) {
+                        tr.innerHTML = `
+                            <td class="p-4 font-semibold text-rose-600 flex items-center gap-3">
+                                <div class="w-12 h-12 bg-rose-50 rounded-lg flex items-center justify-center text-rose-400 text-xs border border-rose-200">❌</div>
+                                <div>${accumulatedFiles[i].name}</div>
+                            </td>
+                            <td class="p-4 text-rose-600" colspan="3">ข้ามไฟล์นี้: ${item.error}</td>
+                        `;
+                    } else {
+                        let thumbHtml = item.annotated_image ? 
+                            `<img src="${item.annotated_image}" class="w-12 h-12 object-cover rounded-lg border shadow-sm">` : 
+                            `<div class="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 text-xs border">No Preview</div>`;
+
+                        tr.innerHTML = `
+                            <td class="p-4 font-semibold text-slate-900 flex items-center gap-3">
+                                ${thumbHtml}
+                                <div>
+                                    ${item.filename}
+                                    <div class="text-xs text-slate-400 font-normal">เลนส์: ${item.lens}</div>
+                                </div>
+                            </td>
+                            <td class="p-4 text-xs text-slate-700 space-y-1">
+                                <div><b>รูรับแสง:</b> f/${item.f_number} | <b>ชัตเตอร์:</b> ${item.exposure_time}s</div>
+                                <div><b>ทางยาวโฟกัส:</b> ${item.focal_length}mm | <b>ISO:</b> ${item.iso}</div>
+                            </td>
+                            <td class="p-4">
+                                <div class="text-xl font-black text-indigo-600">${item.sharpness}</div>
+                                <div class="text-xs font-bold">${item.quality}</div>
+                                <div class="text-[11px] text-slate-500">${item.advice}</div>
+                                <div class="text-xs text-purple-700 mt-1">AF Fine-tune: ${item.af_fine_tune}</div>
+                            </td>
+                            <td class="p-4 text-center">
+                                ${item.annotated_image ? `<button onclick="openModal('${item.annotated_image}', '${item.af_point}', '${item.advice}')" class="bg-slate-800 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-slate-700 shadow">🔍 ดูพิกัดจุดโฟกัส</button>` : '-'}
+                            </td>
+                        `;
+                    }
+                } catch (err) {
+                    tr.classList.remove('bg-amber-50');
+                    tr.innerHTML = `<td class="p-4 font-semibold text-rose-600">${accumulatedFiles[i].name}</td><td class="p-4 text-rose-600" colspan="3">❌ เซิร์ฟเวอร์สะดุด</td>`;
+                }
+
+                document.getElementById('overallStatus').innerText = `กำลังประมวลผล ${i + 1} / ${accumulatedFiles.length} ไฟล์`;
+            }
+
+            document.getElementById('overallStatus').innerText = `✅ ประมวลผลเสร็จสิ้นเรียบร้อย`;
+            updateTableSummaryAdvice();
+            btn.disabled = false;
+            btn.innerText = "🚀 เริ่มวิเคราะห์ตามลำดับความปลอดภัย";
+        }
+
+        // อัปเดตข้อสังเกตและข้อเสนอแนะเชิงวิชาการท้ายตาราง
+        function updateTableSummaryAdvice() {
+            const valid = analyzedResults.filter(d => !d.error);
+            if (valid.length === 0) return;
+
+            // หาภาพที่คมชัดที่สุดและต่ำที่สุด
+            let best = valid.reduce((prev, curr) => (curr.sharpness > prev.sharpness) ? curr : prev);
+            let worst = valid.reduce((prev, curr) => (curr.sharpness < prev.sharpness) ? curr : prev);
+
+            let html = `
+                <p>• <b>ภาพที่ให้ความคมชัดสูงสุดในชุดนี้คือ:</b> <span class="text-emerald-400 font-bold">${best.filename}</span> (คะแนน ${best.sharpness}) ด้วยการตั้งค่า F-number: f/${best.f_number}, Shutter: ${best.exposure_time}s, ISO: ${best.iso} ซึ่งถือเป็นจุดสมดุลที่ดีที่สุด (Sweet Spot)</p>
+                <p>• <b>ข้อสังเกตการปรับจูน (AF Fine-tune):</b> ค่า Fine-tune ปัจจุบันอยู่ที่ <span class="text-indigo-300 font-bold">${best.af_fine_tune}</span> หากพบว่าภาพส่วนใหญ่มีอาการหลุดโฟกัสหน้า/หลัง แนะนำให้ใช้ข้อมูลเปรียบเทียบในแท็บกราฟเพื่อปรับจูนตัวเลขชดเชยเพิ่มเติม</p>
+                <p>• <b>คำแนะนำทางเทคนิค:</b> ภาพที่มีคะแนนต่ำกว่า 100 (${worst.filename}) ควรตรวจสอบความเร็วชัตเตอร์ว่าต่ำเกินไปจนเกิดความสั่นไหวหรือไม่</p>
+            `;
+            document.getElementById('tableSummaryAdvice').innerHTML = html;
+        }
+
+        let chartInstances = {};
+        function renderAnalyticsCharts() {
+            if (analyzedResults.length === 0) return;
+            const validData = analyzedResults.filter(d => !d.error);
+            const labels = validData.map(d => d.filename);
+            const sharpness = validData.map(d => d.sharpness);
+
+            const drawChart = (canvasId, labelName, xData, xLabel) => {
+                const ctx = document.getElementById(canvasId).getContext('2d');
+                if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+                chartInstances[canvasId] = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: labelName, data: sharpness, backgroundColor: 'rgba(99, 102, 241, 0.6)', borderColor: 'rgb(99, 102, 241)', borderWidth: 1 }]
+                    },
+                    options: { responsive: true, plugins: { legend: { display: false } } }
+                });
+            };
+
+            drawChart('chartISO', 'ISO vs Sharpness', validData.map(d => d.iso), 'ISO');
+            drawChart('chartFocal', 'Focal Length vs Sharpness', validData.map(d => d.focal_length), 'Focal');
+            drawChart('chartShutter', 'Shutter vs Sharpness', validData.map(d => d.exposure_time), 'Shutter');
+            drawChart('chartFNumber', 'F-Number vs Sharpness', validData.map(d => d.f_number), 'F-Number');
+        }
+
+        function openModal(imgSrc, afPoint, advice) {
+            document.getElementById('modalImg').src = imgSrc;
+            document.getElementById('modalAfPoint').innerText = `เซ็นเซอร์ยืนยันพิกัดโฟกัสที่: ${afPoint}`;
+            document.getElementById('modalAdvice').innerText = advice;
+            document.getElementById('imageModal').classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('imageModal').classList.add('hidden'); }
+    </script>
+</body>
+</html>
