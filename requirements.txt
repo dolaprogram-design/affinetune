@@ -1,7 +1,5 @@
 fastapi
 uvicorn
-piexif
-Pillow
 opencv-python-headless
 numpy
 pandas
