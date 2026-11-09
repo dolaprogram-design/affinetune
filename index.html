@@ -3,98 +3,188 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lens Focus & AF Fine-Tune Analysis</title>
-    <!-- โหลด Tailwind CSS และ ExifReader -->
+    <title>Pro Lens & Camera Analytics Dashboard</title>
+    <!-- โหลด Tailwind CSS เพื่อความสวยงามและเป็นระเบียบ -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/exifreader@4/dist/exif-reader.min.js"></script>
     <style>
-        .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        .loader { border-top-color: #6366f1; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen font-sans text-gray-800">
-    <div class="max-w-5xl mx-auto p-6">
-        <div class="text-center mb-8">
-            <h1 class="text-3xl font-bold text-blue-700 mb-2">ระบบวิเคราะห์ความคมชัดและ EXIF</h1>
-            <p class="text-gray-500">อัปโหลดภาพเพื่อตรวจสอบ Micro-adjustment สำหรับจูนโฟกัสเลนส์</p>
-        </div>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+    
+    <div class="max-w-6xl mx-auto p-6 md:p-10">
+        
+        <!-- Header Section -->
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-2">📸 Pro Lens & Camera Analytics</h1>
+            <p class="text-slate-500 text-sm md:text-base">ระบบวิเคราะห์คุณภาพไฟล์ภาพและเลนส์เชิงลึก (รองรับไฟล์ JPEG และ RAW เช่น .NEF พร้อมดึง MakerNotes)</p>
+        </header>
 
-        <!-- ส่วนอัปโหลดไฟล์และแสดงภาพตัวอย่าง -->
-        <div class="bg-white p-6 rounded-lg shadow-md mb-8 text-center">
-            <label class="block mb-4 text-sm font-semibold text-gray-700">เลือกไฟล์ภาพ (JPG, PNG, RAW/NEF)</label>
-            <input type="file" id="imageInput" accept="image/*,.nef,.cr2,.raw" 
-                   class="block w-full max-w-md mx-auto text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 p-3 mb-4">
+        <!-- Upload & Preview Section -->
+        <section class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 transition hover:shadow-md">
+            <h2 class="text-lg font-bold text-slate-700 mb-4 flex items-center">
+                <span class="bg-indigo-100 text-indigo-700 p-2 rounded-lg mr-2 text-sm">📁</span> อัปโหลดไฟล์ภาพเพื่อวิเคราะห์
+            </h2>
             
-            <div class="flex justify-center">
-                <img id="previewImg" class="hidden max-h-64 object-contain rounded border shadow-sm" alt="Preview">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div class="w-full md:w-1/2">
+                    <label class="block mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">เลือกไฟล์ภาพ (JPEG, PNG, RAW/NEF)</label>
+                    <input type="file" id="imageInput" accept="image/*,.nef,.cr2,.arw,.raw" 
+                           class="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-200 rounded-xl bg-slate-50 p-2">
+                </div>
+                <div class="w-full md:w-1/2 flex justify-center bg-slate-100 rounded-xl p-4 min-h-[160px] items-center border border-dashed border-slate-300">
+                    <span id="previewPlaceholder" class="text-slate-400 text-sm">ยังไม่ได้เลือกรูปภาพ</span>
+                    <img id="previewImg" class="hidden max-h-40 object-contain rounded-lg shadow-sm" alt="Preview">
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading Spinner -->
+        <div id="loading" class="hidden flex flex-col justify-center items-center my-12">
+            <div class="loader ease-linear rounded-full border-4 border-t-4 border-slate-200 h-12 w-12 mb-4"></div>
+            <span class="text-indigo-600 font-semibold text-base">กำลังประมวลผลข้อมูลเชิงลึกและ MakerNotes...</span>
+        </div>
+
+        <!-- Error Panel -->
+        <div id="errorPanel" class="hidden bg-rose-50 border border-rose-200 text-rose-700 px-5 py-4 rounded-2xl mb-8 flex items-center">
+            <span class="text-xl mr-3">⚠️</span>
+            <div>
+                <strong class="font-bold">เกิดข้อผิดพลาด: </strong>
+                <span id="errorMsg" class="block sm:inline"></span>
             </div>
         </div>
 
-        <!-- สถานะกำลังโหลด -->
-        <div id="loading" class="hidden flex justify-center items-center my-8">
-            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-10 w-10 mb-4"></div>
-            <span class="ml-4 text-blue-600 font-semibold text-lg">กำลังประมวลผลข้อมูล...</span>
-        </div>
+        <!-- Results Dashboard Grid (4 ส่วนหลัก) -->
+        <section id="resultsPanel" class="space-y-6">
+            <h2 class="text-xl font-bold text-slate-800 border-b pb-3 flex items-center">
+                <span class="bg-emerald-100 text-emerald-700 p-2 rounded-lg mr-2 text-sm">📊</span> ผลการวิเคราะห์เชิงลึก
+            </h2>
 
-        <!-- ส่วนแจ้งเตือนข้อผิดพลาด -->
-        <div id="errorPanel" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-8">
-            <strong class="font-bold">เกิดข้อผิดพลาด! </strong>
-            <span id="errorMsg" class="block sm:inline"></span>
-        </div>
-
-        <!-- เมนูแสดงผลการทำงาน 4 ส่วนหลัก -->
-        <div id="resultsPanel" class="block">
-            <h2 class="text-xl font-bold text-gray-700 mb-4 border-b pb-2">ผลการวิเคราะห์ 4 ส่วนหลัก</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 
-                <!-- 1. ความคมชัด -->
-                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-blue-500 flex flex-col justify-between">
-                    <p class="text-sm text-gray-500 font-semibold mb-1">1. ความคมชัด (Sharpness)</p>
-                    <p id="resSharpness" class="text-3xl font-bold text-gray-800 text-center my-4">-</p>
-                    <p class="text-xs text-gray-400 text-center">ยิ่งค่าสูง ภาพยิ่งคมชัด</p>
-                </div>
-                
-                <!-- 2. AF Fine Tune -->
-                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-green-500 flex flex-col justify-between">
-                    <p class="text-sm text-gray-500 font-semibold mb-1">2. AF Fine-tune</p>
-                    <p id="resAf" class="text-xl font-bold text-gray-800 text-center my-4">-</p>
-                    <p class="text-xs text-gray-400 text-center">ค่าจูนโฟกัสจาก MakerNote</p>
-                </div>
-
-                <!-- 3. EXIF พื้นฐาน -->
-                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-purple-500 flex flex-col justify-between">
-                    <p class="text-sm text-gray-500 font-semibold mb-1">3. ข้อมูลกล้อง (EXIF)</p>
-                    <div class="mt-2 space-y-2">
-                        <p class="text-sm text-gray-700"><b>รูรับแสง:</b> <span id="resFnum">-</span></p>
-                        <p class="text-sm text-gray-700"><b>ระยะโฟกัส:</b> <span id="resFocal">-</span></p>
-                        <p class="text-sm text-gray-700"><b>ISO:</b> <span id="resIso">-</span></p>
+                <!-- 1. ความคมชัด (Sharpness) -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between relative overflow-hidden">
+                    <div class="absolute top-0 left-0 right-0 h-1 bg-indigo-500"></div>
+                    <div>
+                        <span class="text-xs font-bold text-indigo-600 tracking-wider uppercase">ส่วนที่ 1</span>
+                        <h3 class="text-sm font-semibold text-slate-700 mt-1">คะแนนความคมชัด</h3>
                     </div>
+                    <div class="my-6 text-center">
+                        <p id="resSharpness" class="text-3xl md:text-4xl font-black text-slate-900">-</p>
+                        <p id="resQuality" class="text-xs font-semibold mt-2 px-3 py-1 bg-slate-100 text-slate-600 rounded-full inline-block">-</p>
+                    </div>
+                    <p class="text-[11px] text-slate-400 text-center">Laplacian Variance (ยิ่งสูงยิ่งคมชัด)</p>
+                </div>
+                
+                <!-- 2. AF Fine-tune -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between relative overflow-hidden">
+                    <div class="absolute top-0 left-0 right-0 h-1 bg-emerald-500"></div>
+                    <div>
+                        <span class="text-xs font-bold text-emerald-600 tracking-wider uppercase">ส่วนที่ 2</span>
+                        <h3 class="text-sm font-semibold text-slate-700 mt-1">ค่า AF Fine-tune</h3>
+                    </div>
+                    <div class="my-6 text-center">
+                        <p id="resAf" class="text-2xl md:text-3xl font-black text-slate-900">-</p>
+                        <p id="resAfStatus" class="text-xs font-semibold mt-2 text-slate-500">สถานะ: -</p>
+                    </div>
+                    <p class="text-[11px] text-slate-400 text-center">Micro-adjustment จาก MakerNotes</p>
                 </div>
 
-                <!-- 4. ข้อมูลไฟล์ -->
-                <div class="bg-white p-5 rounded-lg shadow border-t-4 border-gray-500 flex flex-col justify-between">
-                    <p class="text-sm text-gray-500 font-semibold mb-1">4. ข้อมูลไฟล์</p>
-                    <p id="resFilename" class="text-sm font-bold text-gray-800 break-words mt-2">-</p>
+                <!-- 3. ข้อมูลกล้องและการตั้งค่า (EXIF) -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between relative overflow-hidden">
+                    <div class="absolute top-0 left-0 right-0 h-1 bg-purple-500"></div>
+                    <div>
+                        <span class="text-xs font-bold text-purple-600 tracking-wider uppercase">ส่วนที่ 3</span>
+                        <h3 class="text-sm font-semibold text-slate-700 mt-1">ตั้งค่ากล้อง (EXIF)</h3>
+                    </div>
+                    <div class="my-4 space-y-2 text-sm">
+                        <div class="flex justify-between border-b border-slate-100 pb-1">
+                            <span class="text-slate-500">รุ่นกล้อง:</span>
+                            <span id="resModel" class="font-medium text-slate-800 truncate max-w-[120px]" title="-">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-100 pb-1">
+                            <span class="text-slate-500">รูรับแสง:</span>
+                            <span id="resFnum" class="font-medium text-slate-800">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-100 pb-1">
+                            <span class="text-slate-500">ทางยาวโฟกัส:</span>
+                            <span id="resFocal" class="font-medium text-slate-800">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">ISO:</span>
+                            <span id="resIso" class="font-medium text-slate-800">-</span>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-400 text-center">ข้อมูลพารามิเตอร์การถ่ายภาพ</p>
+                </div>
+
+                <!-- 4. ข้อมูลไฟล์และเลนส์ -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between relative overflow-hidden">
+                    <div class="absolute top-0 left-0 right-0 h-1 bg-amber-500"></div>
+                    <div>
+                        <span class="text-xs font-bold text-amber-600 tracking-wider uppercase">ส่วนที่ 4</span>
+                        <h3 class="text-sm font-semibold text-slate-700 mt-1">รายละเอียดไฟล์</h3>
+                    </div>
+                    <div class="my-4 space-y-3 text-sm">
+                        <div>
+                            <span class="block text-xs text-slate-400">ชื่อไฟล์:</span>
+                            <p id="resFilename" class="font-semibold text-slate-800 truncate" title="-">-</p>
+                        </div>
+                        <div>
+                            <span class="block text-xs text-slate-400">เลนส์ที่ใช้:</span>
+                            <p id="resLens" class="font-medium text-slate-800 text-xs truncate" title="-">-</p>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-400 text-center">ข้อมูลเลนส์และไฟล์ต้นฉบับ</p>
                 </div>
                 
             </div>
-        </div>
+        </section>
+
+        <!-- Glossary / คำอธิบายศัพท์เฉพาะทาง -->
+        <section class="mt-10 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center">
+                <span class="bg-sky-100 text-sky-700 p-2 rounded-lg mr-2 text-sm">📖</span> คู่มืออธิบายคำศัพท์เฉพาะทาง (Glossary)
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs text-slate-600">
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <strong class="text-slate-800 block mb-1">Sharpness Score (Laplacian Variance)</strong>
+                    คะแนนวัดความคมชัดจากขอบพิกเซล ยิ่งตัวเลขสูง ภาพยิ่งคมชัด (ต่ำกว่า 100 = เบลอ, 500-1500 = คมชัดดี, สูงกว่า 1500 = ยอดเยี่ยม)
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <strong class="text-slate-800 block mb-1">AF Fine-tune (Micro-adjustment)</strong>
+                    ฟังก์ชันปรับจูนโฟกัสในตัวกล้องเพื่อแก้ปัญหาอาการหน้าชัดหลังเบลอ (Front Focus) หรือหลังชัดหน้าเบลอ (Back Focus)
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <strong class="text-slate-800 block mb-1">MakerNotes</strong>
+                    ข้อมูลเมทาดาตาเชิงลึกเฉพาะตัวของค่ายกล้อง (เช่น Nikon, Canon) ที่บันทึกค่าระบบโฟกัสและสถานะการปรับแต่งเลนส์
+                </div>
+            </div>
+        </section>
+
     </div>
 
+    <!-- JavaScript สำหรับจัดการการอัปโหลดและแสดงผล -->
     <script>
         const imageInput = document.getElementById('imageInput');
         const previewImg = document.getElementById('previewImg');
+        const previewPlaceholder = document.getElementById('previewPlaceholder');
         const loading = document.getElementById('loading');
         const errorPanel = document.getElementById('errorPanel');
         const errorMsg = document.getElementById('errorMsg');
 
         function resetValues() {
             document.getElementById('resSharpness').innerText = "-";
+            document.getElementById('resQuality').innerText = "-";
             document.getElementById('resAf').innerText = "-";
+            document.getElementById('resAfStatus').innerText = "สถานะ: -";
+            document.getElementById('resModel').innerText = "-";
             document.getElementById('resFnum').innerText = "-";
             document.getElementById('resFocal').innerText = "-";
             document.getElementById('resIso').innerText = "-";
             document.getElementById('resFilename').innerText = "-";
+            document.getElementById('resLens').innerText = "-";
         }
 
         imageInput.addEventListener('change', async (e) => {
@@ -108,24 +198,14 @@
             if (file.type.startsWith('image/')) {
                 previewImg.src = URL.createObjectURL(file);
                 previewImg.classList.remove('hidden');
+                previewPlaceholder.classList.add('hidden');
             } else {
                 previewImg.classList.add('hidden');
+                previewPlaceholder.classList.remove('hidden');
+                previewPlaceholder.innerText = "ไฟล์ RAW (.NEF / .CR2) เลือกเรียบร้อย";
             }
 
             try {
-                // 1. อ่านค่า AF Fine-tune ฝั่ง Frontend ผ่าน ExifReader
-                let afFineTuneValue = "ไม่พบข้อมูล";
-                try {
-                    const tags = await ExifReader.load(file);
-                    if (tags['AFFineTuneAdj']) afFineTuneValue = tags['AFFineTuneAdj'].description;
-                    else if (tags['Microadjustment']) afFineTuneValue = tags['Microadjustment'].description;
-                    else if (tags['AFMicroAdj']) afFineTuneValue = tags['AFMicroAdj'].description;
-                } catch (exifErr) {
-                    console.warn("EXIF Warning:", exifErr);
-                }
-                document.getElementById('resAf').innerText = afFineTuneValue;
-
-                // 2. ส่งไฟล์ไปประมวลผลที่ Backend API (/analyze บน Render)
                 const formData = new FormData();
                 formData.append("file", file);
 
@@ -136,19 +216,43 @@
 
                 if (!response.ok) {
                     const errData = await response.json().catch(() => ({}));
-                    throw new Error(`ไม่สามารถเชื่อมต่อ API ได้ (Status: ${response.status}) ${errData.detail || ''}`);
+                    throw new Error(errData.detail || `Server Error (${response.status})`);
                 }
 
                 const data = await response.json();
 
-                // 3. แสดงผลลัพธ์ลงบนหน้า Dashboard
-                document.getElementById('resFilename').innerText = data.filename || "-";
-                document.getElementById('resSharpness').innerText = data.sharpness_score ? data.sharpness_score.toFixed(2) : "0.00";
+                // 1. Sharpness & Quality
+                const sharpness = data.sharpness_score || 0;
+                document.getElementById('resSharpness').innerText = sharpness.toFixed(2);
+                
+                let qualityText = "⭐ คมชัดยอดเยี่ยม";
+                let badgeClass = "bg-emerald-100 text-emerald-700";
+                if (sharpness < 100) { qualityText = "🔴 เบลอ / หลุดโฟกัส"; badgeClass = "bg-rose-100 text-rose-700"; }
+                else if (sharpness < 500) { qualityText = "🟡 พอใช้"; badgeClass = "bg-amber-100 text-amber-700"; }
+                else if (sharpness < 1500) { qualityText = "🟢 คมชัดดี"; badgeClass = "bg-indigo-100 text-indigo-700"; }
+                
+                const qualityEl = document.getElementById('resQuality');
+                qualityEl.innerText = qualityText;
+                qualityEl.className = `text-xs font-semibold mt-2 px-3 py-1 rounded-full inline-block ${badgeClass}`;
+
+                // 2. AF Fine-tune
+                document.getElementById('resAf').innerText = data.af_fine_tune !== "N/A" ? data.af_fine_tune : "ไม่พบข้อมูล";
+                document.getElementById('resAfStatus').innerText = `สถานะระบบ: ${data.af_status || 'Off'}`;
+
+                // 3. EXIF Data
+                document.getElementById('resModel').innerText = data.camera_model || "N/A";
+                document.getElementById('resModel').title = data.camera_model || "N/A";
                 
                 const exif = data.exif_data || {};
-                document.getElementById('resFnum').innerText = exif.FNumber ? "f/" + exif.FNumber : "-";
-                document.getElementById('resFocal').innerText = exif.FocalLength ? exif.FocalLength : "-";
-                document.getElementById('resIso').innerText = exif.ISO || "-";
+                document.getElementById('resFnum').innerText = exif.FNumber ? "f/" + exif.FNumber : "N/A";
+                document.getElementById('resFocal').innerText = exif.FocalLength ? exif.FocalLength : "N/A";
+                document.getElementById('resIso').innerText = exif.ISO || "N/A";
+
+                // 4. File & Lens Info
+                document.getElementById('resFilename').innerText = data.filename || "N/A";
+                document.getElementById('resFilename').title = data.filename || "N/A";
+                document.getElementById('resLens').innerText = exif.Lens || "N/A";
+                document.getElementById('resLens').title = exif.Lens || "N/A";
 
             } catch (error) {
                 errorMsg.innerText = error.message;
