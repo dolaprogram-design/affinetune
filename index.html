@@ -443,10 +443,17 @@
             if (analyzedResults.length === 0) return;
             const validData = analyzedResults.filter(d => !d.error);
 
+            // หาค่าต่ำสุด-สูงสุดของชุดข้อมูลปัจจุบัน เพื่อใช้ทำ Gradient
+            const sharpnessValues = validData.map(d => d.sharpness);
+            const minSharpness = Math.min(...sharpnessValues);
+            const maxSharpness = Math.max(...sharpnessValues);
+
+            // ฟังก์ชันไล่เฉดสีแบบ HSL (0=แดง, 60=เหลือง, 120=เขียว) ตามสัดส่วนคะแนน
             const getColor = (sharpness) => {
-                if (sharpness >= 1500) return 'rgba(16, 185, 129, 0.7)'; 
-                if (sharpness >= 500) return 'rgba(245, 158, 11, 0.7)';  
-                return 'rgba(239, 68, 68, 0.7)';                         
+                if (maxSharpness === minSharpness) return 'hsla(120, 80%, 45%, 0.8)'; 
+                const percent = (sharpness - minSharpness) / (maxSharpness - minSharpness);
+                const hue = percent * 120; // แปลงช่วง 0.0-1.0 ให้เป็น 0-120
+                return `hsla(${hue}, 85%, 45%, 0.8)`;
             };
 
             const drawSmartChart = (canvasId, labelName, dataArray, xKey, parseFunc) => {
