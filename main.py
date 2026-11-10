@@ -35,59 +35,69 @@ if os.path.exists("camera_db.json"):
     except Exception as e:
         logger.error(f"Failed to load camera_db.json: {e}")
 
-def get_precise_camera_and_lens(metadata: dict):
-    """
-    ดึงชื่อกล้องและเลนส์โดยอ้างอิงจากฐานข้อมูลเชิงลึก camera_db.json และ ExifTool
-    """
+def get_accurate_camera_name(metadata: dict) -> str:
+    """ทำความสะอาดและจัดรูปแบบชื่อกล้องให้ถูกต้อง ไม่แสดงผลซ้ำซ้อน"""
     make = metadata.get("EXIF:Make", "").strip()
     model = metadata.get("EXIF:Model", "").strip()
-    camera_name = model if make.lower() in model.lower() else f"{make} {model}".strip()
-    if not camera_name:
-        camera_name = "Nikon D7100"
+    
+    if not model:
+        return "Nikon D7100"
+    
+    # ป้องกันการแสดงผลแบรนด์ซ้ำซ้อน (เช่น NIKON CORPORATION NIKON D7100)
+    if make.upper() in model.upper():
+        camera = model
+    else:
+        camera = f"{make} {model}".strip()
+        
+    # แปลงให้เป็นชื่ออ่านง่ายมาตรฐาน
+    camera = camera.replace("NIKON CORPORATION", "Nikon").replace("NIKON", "Nikon")
+    return camera.strip()
 
-    # ค้นหารุ่นเลนส์จาก ID Mapping ใน camera_db.json ถ้ามี
+def get_accurate_lens_name(metadata: dict) -> str:
+    """ดึงและทำความสะอาดชื่อเลนส์ รองรับทั้งเลนส์ค่ายและค่ายอิสระ (Sigma, Tamron) จาก DB และ EXIF"""
     lens_id_mapping = CAMERA_DB.get("lens_id_mapping", {})
     raw_lens_id = str(metadata.get("MakerNotes:LensID") or metadata.get("Nikon:LensType") or "").strip()
     
-    lens_name = ""
     if raw_lens_id in lens_id_mapping:
-        lens_name = lens_id_mapping[raw_lens_id]
-    else:
-        # ตรวจสอบจากแท็กมาตรฐานอื่นๆ
-        tag_candidates = [
-            metadata.get("Composite:LensID"),
-            metadata.get("EXIF:LensModel"),
-            metadata.get("Nikon:LensModel"),
-            metadata.get("MakerNotes:LensModel"),
-            metadata.get("EXIF:LensInfo")
-        ]
-        for name in tag_candidates:
-            if name and isinstance(name, str):
-                clean = name.strip()
-                if len(clean) > 2 and not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean):
-                    lens_name = clean
-                    break
+        return lens_id_mapping[raw_lens_id]
+        
+    tag_candidates = [
+        metadata.get("Composite:LensID"),
+        metadata.get("EXIF:LensModel"),
+        metadata.get("Nikon:LensModel"),
+        metadata.get("MakerNotes:LensModel"),
+        metadata.get("EXIF:LensInfo"),
+        metadata.get("MakerNotes:LensType")
+    ]
+    
+    for raw_name in tag_candidates:
+        if raw_name and isinstance(raw_name, str):
+            clean_name = raw_name.strip()
+            if len(clean_name) > 2 and not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean_name):
+                # ตัดคำว่า NIKON CORPORATION ที่ติดมาใน LensModel ออก
+                clean_name = clean_name.replace("NIKON CORPORATION", "").replace("Nikon Corp", "").strip()
+                brand = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "")
+                if brand and "sigma" in str(brand).lower() and "sigma" not in clean_name.lower():
+                    return f"Sigma {clean_name}"
+                return clean_name if clean_name else "Unknown Lens"
 
-    # กรณีเลนส์ค่ายอิสระ (เช่น Sigma 150-600mm)
-    if not lens_name or "unknown" in lens_name.lower():
-        brand = metadata.get("EXIF:LensMake") or make
-        focal = metadata.get("EXIF:FocalLength")
-        fnum = metadata.get("EXIF:FNumber")
-        if focal:
-            focal_str = str(focal).strip().replace(" ", "-")
-            if "mm" not in focal_str.lower():
-                focal_str += "mm"
-            f_str = f" f/{fnum}" if fnum else ""
-            lens_name = f"Sigma {focal_str}{f_str}" if "sigma" in str(brand).lower() else f"{brand} {focal_str}{f_str}"
-        else:
-            lens_name = "Sigma 150-600mm f/5-6.3"
+    # Fallback กรณีไม่มีชื่อเลนส์ชัดเจน
+    brand_fallback = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "Nikon")
+    brand_fallback = brand_fallback.replace("NIKON CORPORATION", "Nikon")
+    focal = metadata.get("EXIF:FocalLength")
+    fnum = metadata.get("EXIF:FNumber")
+    
+    if focal:
+        focal_str = str(focal).strip().replace(" ", "-")
+        if "mm" not in focal_str.lower():
+            focal_str += "mm"
+        f_str = f" f/{fnum}" if fnum else ""
+        return f"{brand_fallback} {focal_str}{f_str}".strip()
 
-    return camera_name, lens_name
+    return "Sigma 150-600mm f/5-6.3 DG OS HSM"
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
-    """
-    แกะพิกัดจุดโฟกัสจริง 51 จุดของ Nikon จาก MakerNotes
-    """
+    """แกะรหัสพิกัดจุดโฟกัสจริง 51 จุดของ Nikon จาก MakerNotes"""
     raw_af = (
         metadata.get("Nikon:PrimaryAFPoint") or
         metadata.get("MakerNotes:PrimaryAFPoint") or
@@ -140,9 +150,7 @@ def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     return af_text, int(norm_x * img_w), int(norm_y * img_h)
 
 def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=120):
-    """
-    สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส
-    """
+    """สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส"""
     h, w = gray_img.shape
     best_x, best_y = init_cx, init_cy
     max_var = -1.0
@@ -170,7 +178,8 @@ def extract_exif_data(file_path: str) -> dict:
     try:
         with ExifToolHelper() as et:
             metadata = et.get_metadata(file_path)[0]
-            camera, lens = get_precise_camera_and_lens(metadata)
+            camera = get_accurate_camera_name(metadata)
+            lens = get_accurate_lens_name(metadata)
             
             af_fine_tune = metadata.get("MakerNotes:AFTuneValue") or metadata.get("Nikon:AFTuneValue") or 0
             exposure = metadata.get("EXIF:ExposureTime")
@@ -188,7 +197,7 @@ def extract_exif_data(file_path: str) -> dict:
     except Exception as e:
         logger.error(f"ExifTool Error: {e}")
         return {
-            "metadata": {}, "camera": "NIKON D7100", "lens": "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary",
+            "metadata": {}, "camera": "Nikon D7100", "lens": "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary",
             "af_fine_tune": "0", "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
         }
 
@@ -210,7 +219,7 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # 2. ค้นหาจุดคมชัดสูงสุดจริงบนภาพ (จุดดาวสีแดง)
+    # 2. ค้นหาจุดคมชัดสูงสุดจริงบนภาพ (ดาวสีแดงกลับมาแล้ว)
     opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//5)
 
     # 3. ขยายกรอบ ROI เพิ่ม 20%
@@ -244,7 +253,7 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         quality = "🔴 ซอฟต์ / เบลอ"
         advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหวขณะบันทึกภาพ"
 
-    # 4. วาดสัญลักษณ์ครบถ้วน (กรอบสี่เหลี่ยม, กากบาทน้ำเงินจุดโฟกัสจริง, ดาวแดงจุดคมสุด)
+    # 4. วาดสัญลักษณ์ครบถ้วนโดยไม่ทำลายสัดส่วนภาพ
     annotated_img = img.copy()
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     thickness = max(2, int(min(w, h) / 400))
