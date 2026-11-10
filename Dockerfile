@@ -19,3 +19,4 @@ COPY . .
 
 # เริ่มต้นเซิร์ฟเวอร์[cite: 16]
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
+RUN apt-get update && apt-get install -y libimage-exiftool-perl
