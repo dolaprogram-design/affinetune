@@ -1,3 +1,5 @@
+
+
 import os
 import re
 import shutil
@@ -11,7 +13,6 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from exiftool import ExifToolHelper
 
-# เปิดระบบแจ้งเตือน Error ไว้ดูใน Log ของ Render
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -27,44 +28,33 @@ app.add_middleware(
 
 def get_accurate_lens_name(metadata: dict) -> str:
     """ดึงชื่อเลนส์ให้ครบถ้วน รองรับเลนส์ค่ายอิสระ (Sigma, Tamron)"""
-    # ExifTool จะสังเคราะห์ชื่อที่ถูกต้องที่สุดไว้ใน Composite:LensID
     best_name = metadata.get("Composite:LensID") or metadata.get("MakerNotes:LensType") or metadata.get("EXIF:LensModel")
     
     if best_name and isinstance(best_name, str):
         clean_name = best_name.strip()
-        # กรองข้อมูลรหัส Hex ออก
         if not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean_name):
             return clean_name
 
-    # หากหาชื่อเต็มไม่เจอ ให้ประกอบชื่อขึ้นมาเองจากสเปก
     brand = metadata.get("EXIF:LensMake", "")
     focal = metadata.get("EXIF:FocalLength", "")
     fnum = metadata.get("EXIF:FNumber", "")
     
     if focal and fnum:
-        # กรณีที่เป็น "150 600" ระบบจะแปลงเป็น "150-600mm" ให้
         focal_str = str(focal).replace(" ", "-") + "mm"
         return f"{brand} {focal_str} f/{fnum}".strip()
 
     return "ไม่ระบุรุ่นเลนส์"
 
 def get_nikon_af_coordinates(af_text: str, img_w: int, img_h: int):
-    """
-    จำลองจุดพิกัด 51 จุดของ Nikon 
-    คำนวณตำแหน่ง X, Y จากคำอธิบาย MakerNotes
-    """
+    """จำลองจุดพิกัดจุดโฟกัส คำนวณตำแหน่ง X, Y จากคำอธิบาย MakerNotes"""
     af_upper = str(af_text).upper().strip()
-    
-    # ค่าเริ่มต้น (กึ่งกลาง)
     norm_x, norm_y = 0.5, 0.5
     
-    # คำนวณแกน Y (บน-ล่าง)
     if "TOP" in af_upper or "UPPER" in af_upper:
         norm_y = 0.30
     elif "BOTTOM" in af_upper or "LOWER" in af_upper:
         norm_y = 0.70
         
-    # คำนวณแกน X (ซ้าย-ขวา)
     if "LEFT" in af_upper:
         norm_x = 0.25 if "FAR" in af_upper else 0.35
     elif "RIGHT" in af_upper:
@@ -82,8 +72,6 @@ def parse_af_point(metadata: dict, img_w: int, img_h: int):
         "Center (Default)"
     )
     af_text = str(raw_af).strip()
-    
-    # ดึงพิกัด (X,Y) จำลอง
     cx, cy = get_nikon_af_coordinates(af_text, img_w, img_h)
     return af_text, cx, cy
 
@@ -98,7 +86,6 @@ def extract_exif_data(file_path: str) -> dict:
             
             lens = get_accurate_lens_name(metadata)
             
-            # ค่า AF Fine-tune
             af_fine_tune = (
                 metadata.get("MakerNotes:AFTuneValue") or
                 metadata.get("Nikon:AFTuneValue") or
@@ -146,13 +133,11 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
 
-    # ดึงพิกัดที่ผ่านการคำนวณ Mapping 51 จุดแล้ว
     af_point_text, cx, cy = parse_af_point(metadata, w, h)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # กรอบ Focus ROI ขนาด 15% ของภาพ
     box_size = min(w, h) // 7
     x1, x2 = max(0, cx - box_size), min(w, cx + box_size)
     y1, y2 = max(0, cy - box_size), min(h, cy + box_size)
@@ -181,15 +166,12 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         quality = "🔴 ซอฟต์ / เบลอ"
         advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหว"
 
-    # วาดเป้าพิกัดบนภาพ
     annotated_img = img.copy()
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     
-    # วาดกรอบและจุดกึ่งกลางเป้า
     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, 4)
     cv2.drawMarker(annotated_img, (cx, cy), (0, 0, 255), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=2)
     
-    # แถบพื้นหลังข้อความให้อ่านง่ายขึ้น
     label = f"AF Point: {af_point_text} | Score: {normalized_score}"
     cv2.rectangle(annotated_img, (10, 10), (w - 10, 50), (0, 0, 0), -1)
     cv2.putText(annotated_img, label, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
@@ -198,6 +180,12 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
 
     return normalized_score, quality, advice, annotated_b64, af_point_text
+
+@app.get("/", response_class=HTMLResponse)
+async def read_index():
+    if os.path.exists("index.html"):
+        return FileResponse("index.html")
+    return HTMLResponse("<h1>Pro Lens & Camera Analytics Dashboard API Running</h1>")
 
 @app.post("/analyze-file")
 async def analyze_file(file: UploadFile = File(...)):
