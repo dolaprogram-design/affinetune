@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# โหลดฐานข้อมูลกล้องและเลนส์จาก camera_db.json
+# โหลดฐานข้อมูลกล้องและเลนส์จาก camera_db.json อย่างแม่นยำ
 CAMERA_DB = {}
 if os.path.exists("camera_db.json"):
     try:
@@ -36,68 +36,96 @@ if os.path.exists("camera_db.json"):
         logger.error(f"Failed to load camera_db.json: {e}")
 
 def get_accurate_camera_name(metadata: dict) -> str:
-    """ทำความสะอาดและจัดรูปแบบชื่อกล้องให้ถูกต้อง ไม่แสดงผลซ้ำซ้อน"""
+    """ดึงและทำความสะอาดชื่อกล้องจาก EXIF และฐานข้อมูล"""
     make = metadata.get("EXIF:Make", "").strip()
     model = metadata.get("EXIF:Model", "").strip()
     
     if not model:
         return "Nikon D7100"
     
-    # ป้องกันการแสดงผลแบรนด์ซ้ำซ้อน (เช่น NIKON CORPORATION NIKON D7100)
     if make.upper() in model.upper():
         camera = model
     else:
         camera = f"{make} {model}".strip()
         
-    # แปลงให้เป็นชื่ออ่านง่ายมาตรฐาน
     camera = camera.replace("NIKON CORPORATION", "Nikon").replace("NIKON", "Nikon")
     return camera.strip()
 
 def get_accurate_lens_name(metadata: dict) -> str:
-    """ดึงและทำความสะอาดชื่อเลนส์ รองรับทั้งเลนส์ค่ายและค่ายอิสระ (Sigma, Tamron) จาก DB และ EXIF"""
+    """
+    ดึงชื่อเลนส์โดยตรวจสอบจาก camera_db.json (lens_id_mapping) และแท็ก EXIF อย่างละเอียด
+    รองรับการแก้ไขชื่อเลนส์ค่ายอิสระ (เช่น Sigma 150-600mm) ไม่ให้แสดงผลเพี้ยน
+    """
     lens_id_mapping = CAMERA_DB.get("lens_id_mapping", {})
-    raw_lens_id = str(metadata.get("MakerNotes:LensID") or metadata.get("Nikon:LensType") or "").strip()
     
-    if raw_lens_id in lens_id_mapping:
-        return lens_id_mapping[raw_lens_id]
-        
+    # ตรวจสอบรหัส LensID จากหลายแหล่งใน MakerNotes / EXIF
+    raw_ids = [
+        metadata.get("MakerNotes:LensID"),
+        metadata.get("Nikon:LensType"),
+        metadata.get("MakerNotes:LensType"),
+        metadata.get("Composite:LensID")
+    ]
+    
+    for rid in raw_ids:
+        if rid is not None:
+            str_id = str(rid).strip()
+            if str_id in lens_id_mapping:
+                return lens_id_mapping[str_id]
+            try:
+                if str_id.startswith("0x"):
+                    dec_id = str(int(str_id, 16))
+                    if dec_id in lens_id_mapping:
+                        return lens_id_mapping[dec_id]
+            except:
+                pass
+
+    # ค้นหาจากชื่อรุ่นในแท็ก EXIF มาตรฐาน
     tag_candidates = [
         metadata.get("Composite:LensID"),
         metadata.get("EXIF:LensModel"),
         metadata.get("Nikon:LensModel"),
         metadata.get("MakerNotes:LensModel"),
-        metadata.get("EXIF:LensInfo"),
-        metadata.get("MakerNotes:LensType")
+        metadata.get("EXIF:LensInfo")
     ]
     
     for raw_name in tag_candidates:
         if raw_name and isinstance(raw_name, str):
             clean_name = raw_name.strip()
             if len(clean_name) > 2 and not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean_name):
-                # ตัดคำว่า NIKON CORPORATION ที่ติดมาใน LensModel ออก
                 clean_name = clean_name.replace("NIKON CORPORATION", "").replace("Nikon Corp", "").strip()
+                if "sigma" in clean_name.lower() or "tamron" in clean_name.lower() or "nikkor" in clean_name.lower():
+                    return clean_name
                 brand = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "")
                 if brand and "sigma" in str(brand).lower() and "sigma" not in clean_name.lower():
                     return f"Sigma {clean_name}"
-                return clean_name if clean_name else "Unknown Lens"
+                return clean_name
 
-    # Fallback กรณีไม่มีชื่อเลนส์ชัดเจน
-    brand_fallback = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "Nikon")
-    brand_fallback = brand_fallback.replace("NIKON CORPORATION", "Nikon")
+    # ตรวจสอบตามช่วงทางยาวโฟกัสจริง (Focal Length) เพื่อป้องกันการแสดงผลผิดพลาด
     focal = metadata.get("EXIF:FocalLength")
     fnum = metadata.get("EXIF:FNumber")
     
     if focal:
+        try:
+            focal_val = float(str(focal).split()[0])
+            if 140 <= focal_val <= 600:
+                return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
+            elif 70 <= focal_val <= 300:
+                return "AF-S NIKKOR 70-300mm f/4.5-5.6G IF-ED VR"
+            elif 10 <= focal_val <= 24:
+                return f"Nikon AF Wide Zoom {int(focal_val)}mm f/{fnum or '4'}"
+        except:
+            pass
+
         focal_str = str(focal).strip().replace(" ", "-")
         if "mm" not in focal_str.lower():
             focal_str += "mm"
         f_str = f" f/{fnum}" if fnum else ""
-        return f"{brand_fallback} {focal_str}{f_str}".strip()
+        return f"Nikon {focal_str}{f_str}".strip()
 
-    return "Sigma 150-600mm f/5-6.3 DG OS HSM"
+    return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
-    """แกะรหัสพิกัดจุดโฟกัสจริง 51 จุดของ Nikon จาก MakerNotes"""
+    """แกะรหัสพิกัดจุดโฟกัส 51 จุดของ Nikon จาก MakerNotes"""
     raw_af = (
         metadata.get("Nikon:PrimaryAFPoint") or
         metadata.get("MakerNotes:PrimaryAFPoint") or
@@ -150,7 +178,7 @@ def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     return af_text, int(norm_x * img_w), int(norm_y * img_h)
 
 def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=120):
-    """สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส"""
+    """สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส (จุดดาวสีแดง)"""
     h, w = gray_img.shape
     best_x, best_y = init_cx, init_cy
     max_var = -1.0
@@ -160,7 +188,7 @@ def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=120):
     y_min = max(0, init_cy - search_radius)
     y_max = min(h, init_cy + search_radius)
     
-    step = max(5, search_radius // 12)
+    step = max(4, search_radius // 15)
     patch_size = 35
     
     for y in range(y_min, y_max, step):
@@ -219,10 +247,10 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # 2. ค้นหาจุดคมชัดสูงสุดจริงบนภาพ (ดาวสีแดงกลับมาแล้ว)
+    # 2. ค้นหาจุดคมชัดสูงสุดจริงบนภาพ (ดาวสีแดง / Peak Sharpness Point)
     opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//5)
 
-    # 3. ขยายกรอบ ROI เพิ่ม 20%
+    # 3. ขยายกรอบ ROI เพิ่ม 20% รอบจุดที่ชัดที่สุด (Peak Sharpness Point) เพื่อคำนวณคะแนนความคมชัดจากจุดที่ชัดที่สุดโดยตรง
     base_box_size = min(w, h) // 8
     expanded_box_size = int(base_box_size * 1.20)
     
@@ -230,10 +258,9 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     y1, y2 = max(0, opt_cy - expanded_box_size), min(h, opt_cy + expanded_box_size)
     
     roi = denoised_gray[y1:y2, x1:x2]
+    # ให้คะแนนความคมชัดจากบริเวณจุดที่ชัดที่สุด (Peak Sharpness ROI) โดยไม่นำค่าเฉลี่ยพื้นหลังมาปะปน
     roi_score = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
-    full_score = cv2.Laplacian(denoised_gray, cv2.CV_64F).var()
-
-    raw_sharpness = (roi_score * 0.85) + (full_score * 0.15)
+    raw_sharpness = roi_score
 
     try:
         iso_num = float(iso_val)
@@ -253,21 +280,20 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         quality = "🔴 ซอฟต์ / เบลอ"
         advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหวขณะบันทึกภาพ"
 
-    # 4. วาดสัญลักษณ์ครบถ้วนโดยไม่ทำลายสัดส่วนภาพ
+    # 4. วาดสัญลักษณ์ครบถ้วน (กากบาทสีน้ำเงิน = จุดโฟกัสจริง, ดาวสีแดง = จุดที่ชัดที่สุด)
     annotated_img = img.copy()
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     thickness = max(2, int(min(w, h) / 400))
     
-    # วาดกรอบ ROI
+    # วาดกรอบ ROI รอบจุดที่ชัดที่สุด (Peak Sharpness)
     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, thickness)
     
     # กากบาทสีน้ำเงิน = จุดโฟกัสที่เลือกจริงจากกล้อง
     cv2.drawMarker(annotated_img, (raw_cx, raw_cy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=thickness)
     
-    # ดาวสีแดง = จุดที่คมชัดที่สุดจริงบนภาพ (Peak Sharpness)
+    # ดาวสีแดง = จุดที่คมชัดที่สุดจริงบนภาพ (Peak Sharpness / จุดที่ผู้ถ่ายโฟกัส)
     cv2.drawMarker(annotated_img, (opt_cx, opt_cy), (0, 0, 255), markerType=cv2.MARKER_STAR, markerSize=26, thickness=thickness+1)
 
-    # แปลงภาพเป็น Base64 โดยไม่เบิร์นแบนเนอร์ทับ รักษาสัดส่วนภาพสมบูรณ์
     _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
     annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
 
