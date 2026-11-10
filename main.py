@@ -54,9 +54,7 @@ def get_accurate_lens_name(metadata: dict) -> str:
     return "Sigma / Unknown Lens"
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
-    """
-    แกะรหัสพิกัดจุดโฟกัสเชิงลึก 51 จุดของ Nikon จาก MakerNotes
-    """
+    """แกะรหัสพิกัดจุดโฟกัสเชิงลึก 51 จุดของ Nikon จาก MakerNotes"""
     raw_af = (
         metadata.get("Nikon:PrimaryAFPoint") or
         metadata.get("MakerNotes:PrimaryAFPoint") or
@@ -79,7 +77,6 @@ def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
             pass
 
     af_upper = af_text.upper()
-    
     if "FAR LEFT" in af_upper or "EXTREME LEFT" in af_upper:
         norm_x = 0.15
     elif "LEFT" in af_upper:
@@ -100,18 +97,36 @@ def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     else:
         norm_y = 0.50
 
-    match_col = re.search(r'COL(?:UMN)?\s*(\d+)', af_upper)
-    match_row = re.search(r'ROW\s*(\d+)', af_upper)
-    if match_col:
-        col_idx = int(match_col.group(1))
-        norm_x = max(0.1, min(0.9, col_idx / 15.0))
-    if match_row:
-        row_idx = int(match_row.group(1))
-        norm_y = max(0.1, min(0.9, row_idx / 5.0))
+    return af_text, int(norm_x * img_w), int(norm_y * img_h)
 
-    cx = int(norm_x * img_w)
-    cy = int(norm_y * img_h)
-    return af_text, cx, cy
+def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=100):
+    """
+    สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส 
+    เพื่อระบุตำแหน่งที่คมที่สุดจริงบนเนื้อภาพ
+    """
+    h, w = gray_img.shape
+    best_x, best_y = init_cx, init_cy
+    max_var = -1.0
+    
+    # กำหนดขอบเขตการกวาดหา (Search Window)
+    x_min = max(0, init_cx - search_radius)
+    x_max = min(w, init_cx + search_radius)
+    y_min = max(0, init_cy - search_radius)
+    y_max = min(h, init_cy + search_radius)
+    
+    step = max(5, search_radius // 10)
+    patch_size = 30
+    
+    for y in range(y_min, y_max, step):
+        for x in range(x_min, x_max, step):
+            patch = gray_img[max(0, y-patch_size):min(h, y+patch_size), max(0, x-patch_size):min(w, x+patch_size)]
+            if patch.size > 0:
+                var = cv2.Laplacian(patch, cv2.CV_64F).var()
+                if var > max_var:
+                    max_var = var
+                    best_x, best_y = x, y
+                    
+    return best_x, best_y
 
 def extract_exif_data(file_path: str) -> dict:
     try:
@@ -123,11 +138,7 @@ def extract_exif_data(file_path: str) -> dict:
             camera = f"{make} {model}".strip()
             
             lens = get_accurate_lens_name(metadata)
-            
-            af_fine_tune = (
-                metadata.get("MakerNotes:AFTuneValue") or
-                metadata.get("Nikon:AFTuneValue") or 0
-            )
+            af_fine_tune = metadata.get("MakerNotes:AFTuneValue") or metadata.get("Nikon:AFTuneValue") or 0
 
             exposure = metadata.get("EXIF:ExposureTime")
             if isinstance(exposure, (int, float)):
@@ -136,21 +147,16 @@ def extract_exif_data(file_path: str) -> dict:
                 exposure_str = str(exposure) if exposure else "N/A"
 
             return {
-                "metadata": metadata,
-                "camera": camera,
-                "lens": lens,
-                "af_fine_tune": str(af_fine_tune),
-                "f_number": metadata.get("EXIF:FNumber", "N/A"),
-                "exposure_time": exposure_str,
-                "iso": metadata.get("EXIF:ISO", 100),
+                "metadata": metadata, "camera": camera, "lens": lens,
+                "af_fine_tune": str(af_fine_tune), "f_number": metadata.get("EXIF:FNumber", "N/A"),
+                "exposure_time": exposure_str, "iso": metadata.get("EXIF:ISO", 100),
                 "focal_length": metadata.get("EXIF:FocalLength", "N/A")
             }
     except Exception as e:
         logger.error(f"ExifTool Error: {e}")
         return {
-            "metadata": {}, "camera": "NIKON CORPORATION D7100", 
-            "lens": "Sigma 150-600mm", "af_fine_tune": "0",
-            "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
+            "metadata": {}, "camera": "NIKON CORPORATION D7100", "lens": "Sigma 150-600mm",
+            "af_fine_tune": "0", "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
         }
 
 def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
@@ -165,14 +171,21 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
 
-    af_point_text, cx, cy = parse_nikon_precise_af(metadata, w, h)
+    # 1. พิกัดจุดโฟกัสจาก EXIF
+    af_point_text, raw_cx, raw_cy = parse_nikon_precise_af(metadata, w, h)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    box_size = min(w, h) // 8
-    x1, x2 = max(0, cx - box_size), min(w, cx + box_size)
-    y1, y2 = max(0, cy - box_size), min(h, cy + box_size)
+    # 2. ค้นหาจุดที่คมชัดที่สุดจริงบนภาพ (Optimal Sharpness Peak)
+    opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//6)
+
+    # 3. ขยายกรอบวิเคราะห์และแสดงผล ROI เพิ่มขึ้น 20% จากเดิม
+    base_box_size = min(w, h) // 8
+    expanded_box_size = int(base_box_size * 1.2) # ขยายเพิ่มอีก 20%
+    
+    x1, x2 = max(0, opt_cx - expanded_box_size), min(w, opt_cx + expanded_box_size)
+    y1, y2 = max(0, opt_cy - expanded_box_size), min(h, opt_cy + expanded_box_size)
     
     roi = denoised_gray[y1:y2, x1:x2]
     roi_score = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
@@ -190,7 +203,7 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
 
     if normalized_score >= 1200:
         quality = "🟢 คมชัดสูงมาก"
-        advice = "โฟกัสแม่นยำ ชิ้นแก้วทำงานเต็มประสิทธิภาพ"
+        advice = "โฟกัสเข้าเป้าแม่นยำ ตำแหน่งคมชัดตรงกับจุดโฟกัส"
     elif normalized_score >= 400:
         quality = "🟡 คมชัดปานกลาง"
         advice = "อยู่ในเกณฑ์ดี สามารถปรับจูน AF Fine-tune เพิ่มเติมได้"
@@ -198,13 +211,18 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         quality = "🔴 ซอฟต์ / เบลอ"
         advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหวขณะบันทึกภาพ"
 
+    # 4. วาดสัญลักษณ์แสดงผลบนภาพ
     annotated_img = img.copy()
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     
+    # วาดกรอบ ROI ที่ขยายแล้ว 20%
     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, 4)
-    cv2.drawMarker(annotated_img, (cx, cy), (0, 0, 255), markerType=cv2.MARKER_CROSS, markerSize=24, thickness=2)
     
-    label = f"AF: {af_point_text} | Score: {normalized_score}"
+    # มาร์กจุดโฟกัสจาก EXIF (สีน้ำเงิน) และจุดที่คมที่สุดจริง (สีแดง)
+    cv2.drawMarker(annotated_img, (raw_cx, raw_cy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=18, thickness=2)
+    cv2.drawMarker(annotated_img, (opt_cx, opt_cy), (0, 0, 255), markerType=cv2.MARKER_STAR, markerSize=22, thickness=2)
+    
+    label = f"AF: {af_point_text} | Peak Score: {normalized_score}"
     cv2.rectangle(annotated_img, (10, 10), (w - 10, 55), (0, 0, 0), -1)
     cv2.putText(annotated_img, label, (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
