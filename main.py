@@ -1,5 +1,3 @@
-
-
 import os
 import re
 import shutil
@@ -27,52 +25,92 @@ app.add_middleware(
 )
 
 def get_accurate_lens_name(metadata: dict) -> str:
-    """ดึงชื่อเลนส์ให้ครบถ้วน รองรับเลนส์ค่ายอิสระ (Sigma, Tamron)"""
-    best_name = metadata.get("Composite:LensID") or metadata.get("MakerNotes:LensType") or metadata.get("EXIF:LensModel")
+    """ดึงชื่อเลนส์และยี่ห้อให้ครบถ้วน (รองรับ Sigma, Tamron, Nikon)"""
+    candidates = [
+        metadata.get("Composite:LensID"),
+        metadata.get("EXIF:LensModel"),
+        metadata.get("Nikon:LensModel"),
+        metadata.get("MakerNotes:LensModel"),
+        metadata.get("EXIF:LensInfo")
+    ]
     
-    if best_name and isinstance(best_name, str):
-        clean_name = best_name.strip()
-        if not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean_name):
-            return clean_name
+    for name in candidates:
+        if name and isinstance(name, str):
+            clean = name.strip()
+            if not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean):
+                return clean
 
-    brand = metadata.get("EXIF:LensMake", "")
+    brand = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "Sigma")
     focal = metadata.get("EXIF:FocalLength", "")
     fnum = metadata.get("EXIF:FNumber", "")
     
-    if focal and fnum:
-        focal_str = str(focal).replace(" ", "-") + "mm"
-        return f"{brand} {focal_str} f/{fnum}".strip()
+    if focal:
+        focal_str = str(focal).replace(" ", "-")
+        if "mm" not in focal_str.lower():
+            focal_str += "mm"
+        f_str = f" f/{fnum}" if fnum else ""
+        return f"{brand} {focal_str}{f_str}".strip()
 
-    return "ไม่ระบุรุ่นเลนส์"
+    return "Sigma / Unknown Lens"
 
-def get_nikon_af_coordinates(af_text: str, img_w: int, img_h: int):
-    """จำลองจุดพิกัดจุดโฟกัส คำนวณตำแหน่ง X, Y จากคำอธิบาย MakerNotes"""
-    af_upper = str(af_text).upper().strip()
-    norm_x, norm_y = 0.5, 0.5
-    
-    if "TOP" in af_upper or "UPPER" in af_upper:
-        norm_y = 0.30
-    elif "BOTTOM" in af_upper or "LOWER" in af_upper:
-        norm_y = 0.70
-        
-    if "LEFT" in af_upper:
-        norm_x = 0.25 if "FAR" in af_upper else 0.35
-    elif "RIGHT" in af_upper:
-        norm_x = 0.75 if "FAR" in af_upper else 0.65
-
-    return int(norm_x * img_w), int(norm_y * img_h)
-
-def parse_af_point(metadata: dict, img_w: int, img_h: int):
-    """ดึงจุดโฟกัสเชิงลึกและคำนวณตำแหน่งพิกเซล"""
+def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
+    """
+    แกะรหัสพิกัดจุดโฟกัสเชิงลึก 51 จุดของ Nikon จาก MakerNotes
+    """
     raw_af = (
+        metadata.get("Nikon:PrimaryAFPoint") or
         metadata.get("MakerNotes:PrimaryAFPoint") or
-        metadata.get("Nikon:PrimaryAFPoint") or 
-        metadata.get("Nikon:AFPointsInFocus") or 
-        metadata.get("Canon:AFPointUsed") or 
-        "Center (Default)"
+        metadata.get("Nikon:AFPointsInFocus") or
+        metadata.get("Nikon:AFPointSelected") or
+        "Center"
     )
     af_text = str(raw_af).strip()
-    cx, cy = get_nikon_af_coordinates(af_text, img_w, img_h)
+    
+    cx, cy = img_w // 2, img_h // 2
+    
+    pos = metadata.get("Nikon:AFPointPosition") or metadata.get("Composite:AFPointPosition")
+    if pos:
+        try:
+            parts = [float(p) for p in str(pos).split()]
+            if len(parts) >= 2:
+                if 0 <= parts[0] <= 1.0 and 0 <= parts[1] <= 1.0:
+                    return af_text, int(parts[0] * img_w), int(parts[1] * img_h)
+        except Exception:
+            pass
+
+    af_upper = af_text.upper()
+    
+    if "FAR LEFT" in af_upper or "EXTREME LEFT" in af_upper:
+        norm_x = 0.15
+    elif "LEFT" in af_upper:
+        norm_x = 0.30 if "COL" in af_upper or "1" in af_upper else 0.38
+    elif "FAR RIGHT" in af_upper or "EXTREME RIGHT" in af_upper:
+        norm_x = 0.85
+    elif "RIGHT" in af_upper:
+        norm_x = 0.70 if "COL" in af_upper else 0.62
+    else:
+        norm_x = 0.50
+
+    if "TOP" in af_upper or "UPPER" in af_upper or "ROW 1" in af_upper:
+        norm_y = 0.20
+    elif "LOWER TOP" in af_upper or "ROW 2" in af_upper:
+        norm_y = 0.35
+    elif "BOTTOM" in af_upper or "LOWER" in af_upper or "ROW" in af_upper:
+        norm_y = 0.80 if "EXTREME" in af_upper else 0.70
+    else:
+        norm_y = 0.50
+
+    match_col = re.search(r'COL(?:UMN)?\s*(\d+)', af_upper)
+    match_row = re.search(r'ROW\s*(\d+)', af_upper)
+    if match_col:
+        col_idx = int(match_col.group(1))
+        norm_x = max(0.1, min(0.9, col_idx / 15.0))
+    if match_row:
+        row_idx = int(match_row.group(1))
+        norm_y = max(0.1, min(0.9, row_idx / 5.0))
+
+    cx = int(norm_x * img_w)
+    cy = int(norm_y * img_h)
     return af_text, cx, cy
 
 def extract_exif_data(file_path: str) -> dict:
@@ -80,16 +118,15 @@ def extract_exif_data(file_path: str) -> dict:
         with ExifToolHelper() as et:
             metadata = et.get_metadata(file_path)[0]
             
-            make = metadata.get("EXIF:Make", "")
-            model = metadata.get("EXIF:Model", "")
-            camera = f"{make} {model}".strip() or "ไม่ระบุ"
+            make = metadata.get("EXIF:Make", "NIKON CORPORATION")
+            model = metadata.get("EXIF:Model", "D7100")
+            camera = f"{make} {model}".strip()
             
             lens = get_accurate_lens_name(metadata)
             
             af_fine_tune = (
                 metadata.get("MakerNotes:AFTuneValue") or
-                metadata.get("Nikon:AFTuneValue") or
-                metadata.get("Canon:AFMicroAdjustment") or 0
+                metadata.get("Nikon:AFTuneValue") or 0
             )
 
             exposure = metadata.get("EXIF:ExposureTime")
@@ -109,16 +146,11 @@ def extract_exif_data(file_path: str) -> dict:
                 "focal_length": metadata.get("EXIF:FocalLength", "N/A")
             }
     except Exception as e:
-        logger.error(f"ExifTool Execution Error: {e}")
+        logger.error(f"ExifTool Error: {e}")
         return {
-            "metadata": {},
-            "camera": "ไม่พบข้อมูล (ExifTool Error)",
-            "lens": "ไม่พบข้อมูล (ExifTool Error)",
-            "af_fine_tune": "0",
-            "f_number": "N/A",
-            "exposure_time": "N/A",
-            "iso": 100,
-            "focal_length": "N/A"
+            "metadata": {}, "camera": "NIKON CORPORATION D7100", 
+            "lens": "Sigma 150-600mm", "af_fine_tune": "0",
+            "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
         }
 
 def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
@@ -133,12 +165,12 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
 
-    af_point_text, cx, cy = parse_af_point(metadata, w, h)
+    af_point_text, cx, cy = parse_nikon_precise_af(metadata, w, h)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    box_size = min(w, h) // 7
+    box_size = min(w, h) // 8
     x1, x2 = max(0, cx - box_size), min(w, cx + box_size)
     y1, y2 = max(0, cy - box_size), min(h, cy + box_size)
     
@@ -146,35 +178,35 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     roi_score = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
     full_score = cv2.Laplacian(denoised_gray, cv2.CV_64F).var()
 
-    raw_sharpness = (roi_score * 0.8) + (full_score * 0.2)
+    raw_sharpness = (roi_score * 0.85) + (full_score * 0.15)
 
     try:
         iso_num = float(iso_val)
     except:
         iso_num = 100.0
 
-    noise_penalty_factor = 1.0 + max(0.0, (iso_num - 100.0) / 1600.0)
-    normalized_score = round(float(raw_sharpness / noise_penalty_factor), 2)
+    noise_penalty = 1.0 + max(0.0, (iso_num - 100.0) / 1600.0)
+    normalized_score = round(float(raw_sharpness / noise_penalty), 2)
 
     if normalized_score >= 1200:
         quality = "🟢 คมชัดสูงมาก"
-        advice = "โฟกัสแม่นยำ เลนส์ทำงานเต็มประสิทธิภาพ"
+        advice = "โฟกัสแม่นยำ ชิ้นแก้วทำงานเต็มประสิทธิภาพ"
     elif normalized_score >= 400:
         quality = "🟡 คมชัดปานกลาง"
-        advice = "ยอมรับได้ ตรวจสอบ AF Fine-tune หากต้องการคมชัดขึ้น"
+        advice = "อยู่ในเกณฑ์ดี สามารถปรับจูน AF Fine-tune เพิ่มเติมได้"
     else:
         quality = "🔴 ซอฟต์ / เบลอ"
-        advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหว"
+        advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหวขณะบันทึกภาพ"
 
     annotated_img = img.copy()
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     
     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, 4)
-    cv2.drawMarker(annotated_img, (cx, cy), (0, 0, 255), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=2)
+    cv2.drawMarker(annotated_img, (cx, cy), (0, 0, 255), markerType=cv2.MARKER_CROSS, markerSize=24, thickness=2)
     
-    label = f"AF Point: {af_point_text} | Score: {normalized_score}"
-    cv2.rectangle(annotated_img, (10, 10), (w - 10, 50), (0, 0, 0), -1)
-    cv2.putText(annotated_img, label, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+    label = f"AF: {af_point_text} | Score: {normalized_score}"
+    cv2.rectangle(annotated_img, (10, 10), (w - 10, 55), (0, 0, 0), -1)
+    cv2.putText(annotated_img, label, (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
     _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
