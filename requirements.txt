@@ -4,6 +4,3 @@ python-multipart
 opencv-python-headless
 numpy
 PyExifTool
-```eof
-
-หลังจากอัปเดตไฟล์นี้และไฟล์ `Dockerfile` ที่เราปรับแก้ก่อนหน้าขึ้น GitHub แล้ว ระบบ Render จะสามารถ Build ผ่านได้อย่างราบรื่นครับ! แจ้งผมได้เลยนะครับหากติดขัดตรงส่วนไหนต่อ
