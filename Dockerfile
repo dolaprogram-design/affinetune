@@ -1,6 +1,5 @@
 FROM python:3.10-slim
 
-# อัปเดตและติดตั้ง ExifTool พร้อมไลบรารี OpenCV ที่จำเป็นแบบสมบูรณ์
 RUN apt-get update && apt-get install -y \
     libimage-exiftool-perl \
     libgl1 \
