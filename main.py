@@ -25,33 +25,41 @@ app.add_middleware(
 )
 
 def get_accurate_lens_name(metadata: dict) -> str:
-    """ดึงชื่อเลนส์และยี่ห้อให้ครบถ้วน (รองรับ Sigma, Tamron, Nikon)"""
-    candidates = [
+    """ดึงข้อมูลยี่ห้อและรุ่นของเลนส์ให้ครบถ้วนและถูกต้อง (รองรับทั้งค่ายหลักและค่ายอิสระ เช่น Sigma, Tamron)"""
+    tag_candidates = [
         metadata.get("Composite:LensID"),
         metadata.get("EXIF:LensModel"),
         metadata.get("Nikon:LensModel"),
         metadata.get("MakerNotes:LensModel"),
-        metadata.get("EXIF:LensInfo")
+        metadata.get("EXIF:LensInfo"),
+        metadata.get("MakerNotes:LensType")
     ]
     
-    for name in candidates:
-        if name and isinstance(name, str):
-            clean = name.strip()
-            if not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean):
-                return clean
+    for raw_name in tag_candidates:
+        if raw_name and isinstance(raw_name, str):
+            clean_name = raw_name.strip()
+            # ตรวจสอบว่าไม่ใช่รหัสขยะหรือรหัส Hex ดิบ
+            if len(clean_name) > 2 and not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean_name):
+                brand = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "")
+                if "sigma" in str(brand).lower() and "sigma" not in clean_name.lower():
+                    return f"Sigma {clean_name}"
+                return clean_name
 
-    brand = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "Sigma")
-    focal = metadata.get("EXIF:FocalLength", "")
-    fnum = metadata.get("EXIF:FNumber", "")
+    brand_fallback = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "Sigma")
+    focal = metadata.get("EXIF:FocalLength")
+    fnum = metadata.get("EXIF:FNumber")
     
     if focal:
-        focal_str = str(focal).replace(" ", "-")
+        focal_str = str(focal).strip()
+        if " " in focal_str and "-" not in focal_str:
+            focal_str = focal_str.replace(" ", "-")
         if "mm" not in focal_str.lower():
             focal_str += "mm"
+            
         f_str = f" f/{fnum}" if fnum else ""
-        return f"{brand} {focal_str}{f_str}".strip()
+        return f"{brand_fallback} {focal_str}{f_str}".strip()
 
-    return "Sigma / Unknown Lens"
+    return "Unknown Lens / Manual Lens"
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     """แกะรหัสพิกัดจุดโฟกัสเชิงลึก 51 จุดของ Nikon จาก MakerNotes"""
@@ -100,15 +108,11 @@ def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     return af_text, int(norm_x * img_w), int(norm_y * img_h)
 
 def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=100):
-    """
-    สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส 
-    เพื่อระบุตำแหน่งที่คมที่สุดจริงบนเนื้อภาพ
-    """
+    """สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส"""
     h, w = gray_img.shape
     best_x, best_y = init_cx, init_cy
     max_var = -1.0
     
-    # กำหนดขอบเขตการกวาดหา (Search Window)
     x_min = max(0, init_cx - search_radius)
     x_max = min(w, init_cx + search_radius)
     y_min = max(0, init_cy - search_radius)
@@ -155,7 +159,7 @@ def extract_exif_data(file_path: str) -> dict:
     except Exception as e:
         logger.error(f"ExifTool Error: {e}")
         return {
-            "metadata": {}, "camera": "NIKON CORPORATION D7100", "lens": "Sigma 150-600mm",
+            "metadata": {}, "camera": "NIKON CORPORATION D7100", "lens": "Sigma 150-600mm f/5-6.3",
             "af_fine_tune": "0", "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
         }
 
@@ -165,7 +169,8 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         raise ValueError("ไม่สามารถเปิดอ่านไฟล์ภาพได้")
 
     h, w = img.shape[:2]
-    max_dim = 1200
+    # ปรับเพิ่มความละเอียดสูงสุดของภาพพรีวิวเป็น 1800px เพื่อความคมชัดสูงเมื่อขยายดูใน Modal
+    max_dim = 1800
     if max(h, w) > max_dim:
         scale = max_dim / float(max(h, w))
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
@@ -180,9 +185,9 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     # 2. ค้นหาจุดที่คมชัดที่สุดจริงบนภาพ (Optimal Sharpness Peak)
     opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//6)
 
-    # 3. ขยายกรอบวิเคราะห์และแสดงผล ROI เพิ่มขึ้น 20% จากเดิม
+    # 3. ขยายกรอบวิเคราะห์และแสดงผล ROI เพิ่มขึ้น 20% จากเดิม (1.20)
     base_box_size = min(w, h) // 8
-    expanded_box_size = int(base_box_size * 1.2) # ขยายเพิ่มอีก 20%
+    expanded_box_size = int(base_box_size * 1.20)
     
     x1, x2 = max(0, opt_cx - expanded_box_size), min(w, opt_cx + expanded_box_size)
     y1, y2 = max(0, opt_cy - expanded_box_size), min(h, opt_cy + expanded_box_size)
@@ -211,22 +216,28 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         quality = "🔴 ซอฟต์ / เบลอ"
         advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหวขณะบันทึกภาพ"
 
-    # 4. วาดสัญลักษณ์แสดงผลบนภาพ
+    # 4. วาดสัญลักษณ์แสดงผลบนภาพด้วยความคมชัดระดับ HD (ใช้เส้นที่หนาและชัดขึ้น)
     annotated_img = img.copy()
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     
-    # วาดกรอบ ROI ที่ขยายแล้ว 20%
-    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, 4)
+    # วาดกรอบ ROI ที่ขยายขึ้น 20%
+    thickness = max(3, int(min(w, h) / 300))
+    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, thickness)
     
     # มาร์กจุดโฟกัสจาก EXIF (สีน้ำเงิน) และจุดที่คมที่สุดจริง (สีแดง)
-    cv2.drawMarker(annotated_img, (raw_cx, raw_cy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=18, thickness=2)
-    cv2.drawMarker(annotated_img, (opt_cx, opt_cy), (0, 0, 255), markerType=cv2.MARKER_STAR, markerSize=22, thickness=2)
+    marker_size = max(20, int(min(w, h) / 50))
+    cv2.drawMarker(annotated_img, (raw_cx, raw_cy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=marker_size, thickness=thickness)
+    cv2.drawMarker(annotated_img, (opt_cx, opt_cy), (0, 0, 255), markerType=cv2.MARKER_STAR, markerSize=marker_size+4, thickness=thickness)
     
+    # แถบข้อความกำกับระดับ HD
+    banner_h = max(50, int(h * 0.06))
+    cv2.rectangle(annotated_img, (0, 0), (w, banner_h), (0, 0, 0), -1)
     label = f"AF: {af_point_text} | Peak Score: {normalized_score}"
-    cv2.rectangle(annotated_img, (10, 10), (w - 10, 55), (0, 0, 0), -1)
-    cv2.putText(annotated_img, label, (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+    font_scale = max(0.6, w / 1600.0)
+    cv2.putText(annotated_img, label, (20, int(banner_h * 0.7)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), max(2, int(font_scale*2)), cv2.LINE_AA)
 
-    _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    # แปลงภาพเป็น Base64 คุณภาพสูง (JPEG Quality = 95) เพื่อให้ภาพไม่แตกเมื่อขยาย
+    _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
     annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
 
     return normalized_score, quality, advice, annotated_b64, af_point_text
