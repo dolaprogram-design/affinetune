@@ -3,4 +3,4 @@ uvicorn
 python-multipart
 opencv-python-headless
 numpy
-PyExifTool==0.5.6
+PyExifTool
