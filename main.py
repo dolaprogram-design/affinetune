@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from exiftool import ExifToolHelper
 
-app = FastAPI(title="Lens Calibration & Camera Analytics API")
+app = FastAPI(title="Pro Lens & Camera Analytics API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,10 +21,7 @@ app.add_middleware(
 )
 
 def get_clean_lens_name(metadata: dict) -> str:
-    """
-    แปลงค่าเลนส์จาก ExifTool ให้เป็นชื่อทางการค้า 
-    กรองรหัส Hex ดิบของ Nikon (เช่น '82 34 76 A6...') ออก
-    """
+    """แปลงค่ารหัส Hex เลนส์ดิบของ Nikon ให้เป็นชื่อเลนส์ทางการค้าที่อ่านง่าย"""
     candidates = [
         metadata.get("Composite:LensID"),
         metadata.get("EXIF:LensModel"),
@@ -35,12 +32,11 @@ def get_clean_lens_name(metadata: dict) -> str:
     
     for cand in candidates:
         if cand and isinstance(cand, str):
-            clean_cand = cand.strip()
-            # เช็กว่าไม่ใช่รหัส Hex ดิบ เช่น "82 34 76 A6 38 40 4B 0E"
-            if not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean_cand):
-                return clean_cand
+            clean = cand.strip()
+            # กรองรหัส Hex ดิบ เช่น "82 34 76 A6..." ออก
+            if not re.match(r'^[0-9A-Fa-f\s]{10,}$', clean):
+                return clean
                 
-    # กรณีดึงชื่อเลนส์ไม่ได้ ให้สร้างชื่อชั่วคราวจากทางยาวโฟกัสและรูรับแสง
     focal = metadata.get("EXIF:FocalLength")
     fnum = metadata.get("EXIF:FNumber")
     if focal:
@@ -49,9 +45,7 @@ def get_clean_lens_name(metadata: dict) -> str:
     return "ไม่ระบุรุ่นเลนส์"
 
 def get_af_fine_tune_value(metadata: dict) -> str:
-    """
-    ดึงค่า AF Fine-tune / Microadjustment แยกตามค่ายกล้อง (Nikon, Canon, Sony)
-    """
+    """ดึงค่า AF Fine-tune / Microadjustment แยกตาม MakerNotes ของแต่ละแบรนด์"""
     val = (
         metadata.get("Nikon:AFTuneValue") or
         metadata.get("Nikon:AFFineTune") or
@@ -66,55 +60,59 @@ def get_af_fine_tune_value(metadata: dict) -> str:
             return str(val)
     return "0"
 
+def get_nikon_51point_coordinates(af_text: str, img_w: int, img_h: int):
+    """
+    ตารางแมปพิกัด 51 จุดโฟกัสของ Nikon (Multi-CAM 3500DX) ให้ตรงกับพิกัดจริงบนเซ็นเซอร์
+    """
+    af_upper = str(af_text).upper().strip()
+    
+    # พิกัดเริ่มต้น: กึ่งกลางภาพ (Normalized 0.5, 0.5)
+    norm_x, norm_y = 0.5, 0.5
+    
+    # ตรวจสอบทิศทางและตำแหน่งจุดโฟกัสเชิงลึก
+    if "CENTER" in af_upper or "C" in af_upper:
+        norm_x, norm_y = 0.5, 0.5
+    elif "TOP" in af_upper or "UPPER" in af_upper:
+        norm_y = 0.32
+    elif "BOTTOM" in af_upper or "LOWER" in af_upper:
+        norm_y = 0.68
+        
+    if "LEFT" in af_upper:
+        norm_x = 0.30 if "FAR" in af_upper else 0.38
+    elif "RIGHT" in af_upper:
+        norm_x = 0.70 if "FAR" in af_upper else 0.62
+
+    # แปลงสัดส่วน Normalized เป็นพิกเซลจริงบนภาพ
+    cx = int(norm_x * img_w)
+    cy = int(norm_y * img_h)
+    
+    return cx, cy
+
 def parse_af_point_and_coordinates(metadata: dict, img_w: int, img_h: int):
-    """
-    ดึงจุดโฟกัสเชิงลึกและคำนวณพิกัด (X, Y) ที่แท้จริงบนภาพ
-    """
+    """อ่านค่า AF Point จาก MakerNotes และคำนวณตำแหน่งพิกเซล (CX, CY)"""
     raw_af = (
         metadata.get("Nikon:AFPointsInFocus") or 
         metadata.get("Nikon:PrimaryAFPoint") or 
         metadata.get("Nikon:AFPointSelected") or
         metadata.get("Canon:AFPointUsed") or 
         metadata.get("Sony:AFPointSelected") or 
-        "Center"
+        "Center (Default)"
     )
     af_text = str(raw_af).strip()
     
-    # ค่า Default คือจุดศูนย์กลางภาพ
-    cx, cy = img_w // 2, img_h // 2
-    
-    # ตรวจสอบว่า ExifTool คืนค่าพิกัดจุดโฟกัสมาให้หรือไม่ (Nikon AFPointPosition)
+    # 1. พยายามอ่านพิกัดตัวเลขโดยตรงจาก ExifTool ถ้ามี
     pos = metadata.get("Nikon:AFPointPosition") or metadata.get("Composite:AFPointPosition")
-    
     if pos:
         try:
             parts = [float(p) for p in str(pos).split()]
             if len(parts) == 2:
-                # กรณีเป็นสัดส่วน (0.0 - 1.0)
                 if 0 <= parts[0] <= 1.0 and 0 <= parts[1] <= 1.0:
-                    cx = int(parts[0] * img_w)
-                    cy = int(parts[1] * img_h)
-                # กรณีเป็นพิกัดพิกเซลจริงเทียบกับขนาดเซ็นเซอร์
-                elif parts[0] > 1 and parts[1] > 1:
-                    af_w = metadata.get("Nikon:AFImageWidth") or img_w
-                    af_h = metadata.get("Nikon:AFImageHeight") or img_h
-                    cx = int((parts[0] / af_w) * img_w)
-                    cy = int((parts[1] / af_h) * img_h)
+                    return af_text, int(parts[0] * img_w), int(parts[1] * img_h)
         except Exception:
             pass
-    else:
-        # คำนวณตำแหน่งแบบประมาณการตามชื่อทิศทางจุดโฟกัส (กรณีไม่มีพิกัดตัวเลข)
-        af_lower = af_text.lower()
-        if "left" in af_lower:
-            cx = int(img_w * 0.3)
-        elif "right" in af_lower:
-            cx = int(img_w * 0.7)
             
-        if "top" in af_lower or "upper" in af_lower:
-            cy = int(img_h * 0.3)
-        elif "bottom" in af_lower or "lower" in af_lower:
-            cy = int(img_h * 0.7)
-
+    # 2. กรณีไม่มีพิกัดตัวเลข ให้ผ่านตารางแมปพิกัด 51 จุด
+    cx, cy = get_nikon_51point_coordinates(af_text, img_w, img_h)
     return af_text, cx, cy
 
 def extract_exif_data(file_path: str) -> dict:
@@ -142,7 +140,7 @@ def extract_exif_data(file_path: str) -> dict:
                 "af_fine_tune": af_fine_tune,
                 "f_number": metadata.get("EXIF:FNumber", "N/A"),
                 "exposure_time": exposure_str,
-                "iso": metadata.get("EXIF:ISO", "N/A"),
+                "iso": metadata.get("EXIF:ISO", 100),
                 "focal_length": metadata.get("EXIF:FocalLength", "N/A")
             }
     except Exception:
@@ -153,11 +151,11 @@ def extract_exif_data(file_path: str) -> dict:
             "af_fine_tune": "0",
             "f_number": "N/A",
             "exposure_time": "N/A",
-            "iso": "N/A",
+            "iso": 100,
             "focal_length": "N/A"
         }
 
-def process_image_and_sharpness(file_path: str, metadata: dict):
+def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     img = cv2.imread(file_path)
     if img is None:
         raise ValueError("ไม่สามารถเปิดอ่านไฟล์ภาพได้")
@@ -170,51 +168,71 @@ def process_image_and_sharpness(file_path: str, metadata: dict):
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
 
-    # คำนวณจุดโฟกัสและพิกัด (X, Y) จริงบนภาพ
+    # ดึงตำแหน่งจุดโฟกัสจริง
     af_point_text, cx, cy = parse_af_point_and_coordinates(metadata, w, h)
 
-    # ตัดคำนวณความคมชัดเฉพาะบริเวณรอบจุดโฟกัส (ROI) ร่วมกับภาพรวม
+    # แปลงภาพเป็นขาวดำ
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    box_size = min(w, h) // 8
     
+    # -------------------------------------------------------------------------
+    # แก้ไขจุดสำคัญ 1: ตัดสัญญาณ Noise จาก ISO สูงด้วย Gaussian Blur (3x3)
+    # -------------------------------------------------------------------------
+    denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    # -------------------------------------------------------------------------
+    # แก้ไขจุดสำคัญ 2: คำนวณความคมชัดเฉพาะขอบเขตจุดโฟกัส (Focus Region of Interest)
+    # -------------------------------------------------------------------------
+    box_size = min(w, h) // 10
     x1, x2 = max(0, cx - box_size), min(w, cx + box_size)
     y1, y2 = max(0, cy - box_size), min(h, cy + box_size)
     
-    roi = gray[y1:y2, x1:x2]
-    roi_sharpness = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
-    full_sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
-    
-    # คำนวณคะแนนความคมชัดถ่วงน้ำหนัก (เน้นพื้นที่จุดโฟกัส 70% + ภาพรวม 30%)
-    sharpness_score = round(float((roi_sharpness * 0.7) + (full_sharpness * 0.3)), 2)
+    roi = denoised_gray[y1:y2, x1:x2]
+    roi_score = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
+    full_score = cv2.Laplacian(denoised_gray, cv2.CV_64F).var()
 
-    # ประเมินระดับคุณภาพ
-    if sharpness_score >= 1500:
+    # ถ่วงน้ำหนักความคมชัด: จุดโฟกัส ROI 80% + ภาพรวม 20%
+    raw_sharpness = (roi_score * 0.8) + (full_score * 0.2)
+
+    # -------------------------------------------------------------------------
+    # แก้ไขจุดสำคัญ 3: Normalization ปรับระดับสเกลคะแนนตามค่า ISO เพื่อความแม่นยำ
+    # -------------------------------------------------------------------------
+    try:
+        iso_num = float(iso_val)
+    except (ValueError, TypeError):
+        iso_num = 100.0
+
+    # ปรับสเกลคะแนนให้อยู่ในระดับมาตรฐาน (เทียบเท่าสเกล 0 - 2,000)
+    noise_penalty_factor = 1.0 + max(0.0, (iso_num - 100.0) / 1600.0)
+    normalized_score = round(float(raw_sharpness / noise_penalty_factor), 2)
+
+    # ประเมินเกณฑ์คุณภาพภาพถ่าย
+    if normalized_score >= 1200:
         quality = "🟢 คมชัดสูงมาก (Excellent)"
         advice = "โฟกัสเข้าเป้าแม่นยำ ชิ้นแก้วทำงานได้เต็มประสิทธิภาพ"
-    elif sharpness_score >= 500:
+    elif normalized_score >= 400:
         quality = "🟡 คมชัดปานกลาง (Good)"
-        advice = "ความคมชัดอยู่ในเกณฑ์ยอมรับได้ หากต้องการคมกว่านี้ลองปรับจูน AF Fine-tune"
+        advice = "ความคมชัดอยู่ในเกณฑ์ดี หากต้องการคมกว่านี้ลองตรวจสอบ AF Fine-tune"
     else:
         quality = "🔴 ซอฟต์ / เบลอ (Soft/Out of Focus)"
         advice = "ภาพมีความซอฟต์หรือโฟกัสคลาดเคลื่อน ควรตรวจสอบอาการ Front/Back Focus"
 
-    # วาดมาร์กเกอร์ตรงพิกัดจุดโฟกัสจริง
+    # วาดมาร์กเกอร์จุดโฟกัสจริงลงบนภาพ preview
     annotated_img = img.copy()
-    box_color = (0, 255, 0) if sharpness_score >= 500 else (0, 0, 255)
+    box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     
     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, 3)
     cv2.circle(annotated_img, (cx, cy), 6, (255, 255, 255), -1)
     cv2.circle(annotated_img, (cx, cy), 3, (0, 0, 0), -1)
     
-    label = f"AF: {af_point_text} | Score: {sharpness_score}"
+    label = f"AF: {af_point_text} | Score: {normalized_score}"
     cv2.putText(annotated_img, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
-    # แปลงภาพเป็น Base64 ส่งกลับไปยังหน้าต่าง Modal
+    # แปลงภาพเป็น Base64
     _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     base64_str = base64.b64encode(buffer).decode('utf-8')
     annotated_b64 = f"data:image/jpeg;base64,{base64_str}"
 
-    return sharpness_score, quality, advice, annotated_b64, af_point_text
+    return normalized_score, quality, advice, annotated_b64, af_point_text
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -233,7 +251,7 @@ async def analyze_file(file: UploadFile = File(...)):
         exif_info = extract_exif_data(temp_path)
 
         sharpness, quality, advice, annotated_b64, af_point = process_image_and_sharpness(
-            temp_path, exif_info["metadata"]
+            temp_path, exif_info["metadata"], exif_info["iso"]
         )
 
         return {
