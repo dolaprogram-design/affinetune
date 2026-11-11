@@ -25,18 +25,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# โหลดฐานข้อมูลกล้องและเลนส์จาก camera_db.json
-CAMERA_DB = {}
-if os.path.exists("camera_db.json"):
-    try:
-        with open("camera_db.json", "r", encoding="utf-8") as f:
-            CAMERA_DB = json.load(f)
-            logger.info("Loaded camera_db.json successfully.")
-    except Exception as e:
-        logger.error(f"Failed to load camera_db.json: {e}")
-
 def parse_float(val) -> float | None:
-    """สกัดและแปลงค่าตัวเลขจากข้อความ EXIF เช่น '10mm', '14.0 mm', 'f/4.8' """
+    """สกัดตัวเลข float จากข้อความ EXIF"""
     if val is None:
         return None
     if isinstance(val, (int, float)):
@@ -49,22 +39,8 @@ def parse_float(val) -> float | None:
             pass
     return None
 
-def parse_lens_info(lens_info_str) -> tuple[float | None, float | None, float | None, float | None]:
-    """
-    แปลงค่า LensInfo / LensSpec (4-Tuple Range) 
-    เช่น '10-20mm f/4-5.6' หรือ '[10, 20, 4, 5.6]' ให้เป็น (min_focal, max_focal, min_ap, max_ap)
-    """
-    if not lens_info_str:
-        return None, None, None, None
-    nums = [float(n) for n in re.findall(r'[\d.]+', str(lens_info_str))]
-    if len(nums) >= 4:
-        return nums[0], nums[1], nums[2], nums[3]
-    elif len(nums) == 2:
-        return nums[0], nums[1], None, None
-    return None, None, None, None
-
 def is_hex_or_raw(s: str) -> bool:
-    """ตรวจสอบว่าเป็นรหัส Hex ดิบหรือไม่ (เช่น 'B0 4C 50 50 14 14 B2 06')"""
+    """ตรวจสอบว่าข้อความชื่อเลนส์เป็นรหัส Hex ดิบหรือตัวเลขล้วนที่ยังไม่ถอดรหัสหรือไม่"""
     if not s or not isinstance(s, str):
         return True
     clean = s.strip()
@@ -77,160 +53,105 @@ def is_hex_or_raw(s: str) -> bool:
         return True
     return False
 
+def format_brand_casing(name: str) -> str:
+    """ปรับแต่งตัวพิมพ์แบรนด์ให้สวยงามสม่ำเสมอ"""
+    if not name:
+        return ""
+    name = re.sub(r'^\bNIKON\b', 'Nikon', name, flags=re.IGNORECASE)
+    name = re.sub(r'^\bCANON\b', 'Canon', name, flags=re.IGNORECASE)
+    name = re.sub(r'^\bSONY\b', 'Sony', name, flags=re.IGNORECASE)
+    name = re.sub(r'^\bSIGMA\b', 'Sigma', name, flags=re.IGNORECASE)
+    name = re.sub(r'^\bTAMRON\b', 'Tamron', name, flags=re.IGNORECASE)
+    return name
+
 def get_accurate_camera_name(metadata: dict) -> str:
-    """ทำความสะอาดชื่อกล้อง ตัดคำว่า NIKON CORPORATION / CANON INC. ที่ซ้ำซ้อนออก"""
-    make = str(metadata.get("EXIF:Make", "")).strip()
-    model = str(metadata.get("EXIF:Model", "")).strip()
+    """
+    ดึงและถอดรหัสยี่ห้อและรุ่นกล้องโดยตรงจาก ExifTool (วิธีเดียวกับเวอร์ชัน notebook เดิม)
+    """
+    make = (
+        metadata.get("EXIF:Make") or 
+        metadata.get("Make") or 
+        metadata.get("MakerNotes:Make") or 
+        ""
+    )
+    model = (
+        metadata.get("EXIF:Model") or 
+        metadata.get("Model") or 
+        metadata.get("MakerNotes:Model") or 
+        ""
+    )
     
-    if not model:
+    make_str = str(make).strip()
+    model_str = str(model).strip()
+    
+    make_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', make_str).strip()
+    model_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', model_str).strip()
+    
+    if not make_clean and not model_clean:
         return "Nikon D810"
+    if not make_clean:
+        return format_brand_casing(model_clean)
+    if not model_clean:
+        return format_brand_casing(make_clean)
         
-    make_clean = re.sub(r'(?i)NIKON\s+CORPORATION|CANON\s+INC\.?', '', make).strip()
-    model_clean = re.sub(r'(?i)NIKON\s+CORPORATION|CANON\s+INC\.?', '', model).strip()
-    
-    brand = "Nikon" if "nikon" in make.lower() or "nikon" in model.lower() or model_clean.startswith("D") else "Canon" if "canon" in make.lower() or "canon" in model.lower() or "eos" in model.lower() else make_clean
-    
-    if model_clean.lower().startswith(brand.lower()):
-        model_clean = model_clean[len(brand):].strip()
+    if model_clean.lower().startswith(make_clean.lower()):
+        return format_brand_casing(model_clean)
         
-    return f"{brand} {model_clean}".strip()
+    return format_brand_casing(f"{make_clean} {model_clean}")
 
 def get_accurate_lens_name(metadata: dict) -> str:
     """
-    ดึงชื่อเลนส์ทางการค้า โดยวิเคราะห์จากแท็กทางกายภาพจริงของเลนส์ (Lens Capabilities):
-    1. EXIF:MaxApertureValue (รูรับแสงกว้างสุดทางกายภาพของเลนส์ ณ ระยะนั้น ไม่ใช่ FNumber ที่ใช้ถ่ายจริง)
-    2. EXIF:LensInfo / LensSpec (ช่วงระยะและขนาดรูรับแสงกว้างสุดของเลนส์ เช่น 10-20mm f/4-5.6)
-    3. EXIF:LensMake / MakerNotes:LensMake (ผู้ผลิตจริง)
-    4. EXIF:FocalLength (ทางยาวโฟกัสจริงที่ถ่าย)
+    ดึงชื่อเลนส์ทางการค้าแบบ 100% Accurate โดยใช้ฐานข้อมูล ExifTool โดยตรง (เหมือนเวอร์ชัน notebook เดิม)
+    ExifTool จะทำการจับคู่รหัสชิปเลนส์ (LensID/MakerNotes) กับฐานข้อมูลของเลนส์ยี่ห้อต่างๆ (Nikon, Sigma, Canon ฯลฯ)
     """
-    focal_val = parse_float(metadata.get("EXIF:FocalLength"))
-    fnum_val = parse_float(metadata.get("EXIF:FNumber"))
-    max_aperture_val = parse_float(
-        metadata.get("EXIF:MaxApertureValue") or 
-        metadata.get("MakerNotes:MaxApertureValue") or 
-        metadata.get("Nikon:MaxAperture")
-    )
-    
-    lens_make = str(metadata.get("EXIF:LensMake") or metadata.get("MakerNotes:LensMake") or metadata.get("EXIF:Make") or "").lower()
-    lens_info_raw = metadata.get("EXIF:LensInfo") or metadata.get("Composite:LensInfo") or metadata.get("Composite:LensSpec")
-    min_focal, max_focal, min_ap, max_ap = parse_lens_info(lens_info_raw)
-
-    # 1. วิเคราะห์จากแท็กช่วงสเปกเลนส์ (LensInfo Range Sanity Check)
-    if min_focal is not None and max_focal is not None:
-        # เลนส์กลุ่ม Sigma 10-20mm
-        if min_focal <= 11.0 and max_focal <= 22.0:
-            if (min_ap and min_ap <= 3.6) or (max_aperture_val and max_aperture_val <= 3.6 and focal_val and focal_val <= 11.0):
-                return "Sigma 10-20mm f/3.5 EX DC HSM"
-            return "Sigma 10-20mm f/4-5.6 EX DC HSM"
-        # เลนส์ Nikkor 14-24mm f/2.8
-        elif min_focal >= 13.5 and max_focal <= 25.0:
-            if (min_ap and min_ap <= 3.0) or (max_aperture_val and max_aperture_val <= 3.0):
-                return "AF-S NIKKOR 14-24mm f/2.8G ED"
-        # เลนส์ Sigma 150-600mm
-        elif min_focal >= 140.0 and max_focal >= 550.0:
-            return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
-
-    # 2. วิเคราะห์จาก Focal Length ร่วมกับ MaxApertureValue ( Physical Capability )
-    if focal_val is not None:
-        # ช่วง ultra-wide (9mm - 20mm)
-        if 9.0 <= focal_val <= 20.0:
-            # เลนส์ Nikkor 14-24mm f/2.8 จะมี MaxApertureValue = 2.8 เสมอ!
-            # หาก MaxApertureValue > 3.0 หรือเป็น Sigma LensMake แสดงว่าเป็น Sigma 10-20mm
-            if max_aperture_val and max_aperture_val <= 3.0 and focal_val >= 13.5:
-                return "AF-S NIKKOR 14-24mm f/2.8G ED"
-            elif "sigma" in lens_make or focal_val < 13.5 or (max_aperture_val and max_aperture_val > 3.0):
-                if max_aperture_val and max_aperture_val <= 3.5:
-                    return "Sigma 10-20mm f/3.5 EX DC HSM"
-                return "Sigma 10-20mm f/4-5.6 EX DC HSM"
-
-    # 3. ตรวจสอบรหัส LensID จาก camera_db.json
-    lens_id_mapping = CAMERA_DB.get("lens_id_mapping", {})
-    raw_ids = [
-        metadata.get("MakerNotes:LensID"),
-        metadata.get("Nikon:LensType"),
-        metadata.get("MakerNotes:LensType"),
-        metadata.get("Composite:LensID")
-    ]
-    
-    for rid in raw_ids:
-        if rid is not None:
-            str_id = str(rid).strip()
-            if str_id in lens_id_mapping:
-                return lens_id_mapping[str_id]
-            try:
-                if str_id.startswith("0x"):
-                    dec_id = str(int(str_id, 16))
-                    if dec_id in lens_id_mapping:
-                        return lens_id_mapping[dec_id]
-            except Exception:
-                pass
-
-    # 4. ค้นหาจากแท็ก EXIF มาตรฐาน โดยต้องไม่เป็นรหัส Hex ดิบ
+    # เรียงลำดับความแม่นยำของ Tag ที่ ExifTool ถอดรหัสชื่อเลนส์ทางการค้าออกมาได้สมบูรณ์ที่สุด
     tag_candidates = [
         metadata.get("Composite:LensID"),
+        metadata.get("LensID"),
+        metadata.get("MakerNotes:LensID"),
+        metadata.get("Composite:Lens"),
+        metadata.get("Lens"),
         metadata.get("EXIF:LensModel"),
-        metadata.get("Nikon:LensModel"),
+        metadata.get("LensModel"),
         metadata.get("MakerNotes:LensModel"),
-        metadata.get("EXIF:LensInfo")
+        metadata.get("EXIF:LensInfo"),
+        metadata.get("LensInfo"),
+        metadata.get("Composite:LensSpec")
     ]
     
-    for raw_name in tag_candidates:
-        if raw_name and isinstance(raw_name, str):
-            clean_name = raw_name.strip()
-            if not is_hex_or_raw(clean_name):
-                # ป้องกัน False Positive ของ Nikkor 14-24mm f/2.8
-                if "14-24" in clean_name:
-                    if focal_val and focal_val < 13.5:
-                        return "Sigma 10-20mm f/4-5.6 EX DC HSM"
-                    if max_aperture_val and max_aperture_val > 3.0:
-                        return "Sigma 10-20mm f/4-5.6 EX DC HSM"
-                clean_name = re.sub(r'(?i)NIKON\s+CORPORATION|Nikon\s+Corp', '', clean_name).strip()
-                if lens_make and "sigma" in lens_make and "sigma" not in clean_name.lower():
-                    return f"Sigma {clean_name}"
-                if clean_name:
-                    return clean_name
+    for cand in tag_candidates:
+        if cand is not None:
+            cand_str = str(cand).strip()
+            # ตรวจสอบว่าไม่ใช่ค่าว่าง N/A หรือรหัส Hex ดิบ
+            if cand_str and cand_str.upper() != "N/A":
+                if not is_hex_or_raw(cand_str):
+                    # ลบชื่อซ้ำซ้อนของบริษัทถ้ามี
+                    cleaned = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r'\1 ', cand_str).strip()
+                    return cleaned
 
-    # 5. Fallback Rules ตามทางยาวโฟกัส (Focal Length) และ Max Aperture
-    if focal_val is not None:
-        if 9.0 <= focal_val <= 20.0:
-            return "Sigma 10-20mm f/4-5.6 EX DC HSM"
-        elif 140.0 <= focal_val <= 600.0:
-            return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
-        elif abs(focal_val - 50.0) < 1.0:
-            if (max_aperture_val and max_aperture_val <= 1.5) or (fnum_val and fnum_val <= 1.4):
-                return "AF-S NIKKOR 50mm f/1.4G"
-            elif (max_aperture_val and max_aperture_val <= 1.9) or (fnum_val and fnum_val <= 1.8):
-                return "AF-S NIKKOR 50mm f/1.8G"
-            return "AF-S NIKKOR 50mm f/1.4G"
-        elif abs(focal_val - 85.0) < 1.0:
-            return "AF-S NIKKOR 85mm f/1.8G"
-        elif abs(focal_val - 35.0) < 1.0:
-            return "AF-S NIKKOR 35mm f/1.8G ED"
-        elif 70.0 <= focal_val <= 300.0:
-            return "AF-S NIKKOR 70-300mm f/4.5-5.6G IF-ED VR"
-        elif 24.0 <= focal_val <= 70.0:
-            return "AF-S NIKKOR 24-70mm f/2.8G ED"
-        else:
-            f_str = f"{int(focal_val)}mm" if focal_val.is_integer() else f"{focal_val}mm"
-            fn_str = f" f/{fnum_val}" if fnum_val else ""
-            return f"Nikon {f_str}{fn_str}".strip()
+    # Fallback กรณีไม่พบ Tag ชื่อเลนส์ตรงๆ ให้สังเคราะห์จาก FocalLength และ FNumber
+    focal = parse_float(metadata.get("EXIF:FocalLength") or metadata.get("FocalLength"))
+    fnum = parse_float(metadata.get("EXIF:FNumber") or metadata.get("FNumber"))
+    if focal:
+        f_str = f"{int(focal)}mm" if focal.is_integer() else f"{focal}mm"
+        fn_str = f" f/{fnum}" if fnum else ""
+        return f"Lens {f_str}{fn_str}".strip()
 
-    return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+    return "N/A"
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
-    """แกะรหัสพิกัดจุดโฟกัส 51 จุดของ Nikon จาก MakerNotes"""
+    """แกะรหัสพิกัดจุดโฟกัสจาก MakerNotes"""
     raw_af = (
         metadata.get("Nikon:PrimaryAFPoint") or
         metadata.get("MakerNotes:PrimaryAFPoint") or
+        metadata.get("PrimaryAFPoint") or
         metadata.get("Nikon:AFPointsInFocus") or
         metadata.get("Nikon:AFPointSelected") or
         "Center"
     )
     af_text = str(raw_af).strip()
     
-    cx, cy = img_w // 2, img_h // 2
-    
-    pos = metadata.get("Nikon:AFPointPosition") or metadata.get("Composite:AFPointPosition")
+    pos = metadata.get("Nikon:AFPointPosition") or metadata.get("Composite:AFPointPosition") or metadata.get("AFPointPosition")
     if pos:
         try:
             parts = [float(p) for p in str(pos).split()]
@@ -271,7 +192,7 @@ def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     return af_text, int(norm_x * img_w), int(norm_y * img_h)
 
 def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=120):
-    """สแกนหาจุดที่มีความคมชัดสูงสุด (Peak Sharpness) บริเวณรอบๆ จุดโฟกัส (จุดดาวสีแดง)"""
+    """สแกนหาจุดที่มีความคมชัดสูงสุดรอบพิกัดจุดโฟกัส"""
     h, w = gray_img.shape
     best_x, best_y = init_cx, init_cy
     max_var = -1.0
@@ -302,8 +223,8 @@ def extract_exif_data(file_path: str) -> dict:
             camera = get_accurate_camera_name(metadata)
             lens = get_accurate_lens_name(metadata)
             
-            af_fine_tune = metadata.get("MakerNotes:AFTuneValue") or metadata.get("Nikon:AFTuneValue") or 0
-            exposure = metadata.get("EXIF:ExposureTime")
+            af_fine_tune = metadata.get("MakerNotes:AFTuneValue") or metadata.get("Nikon:AFTuneValue") or metadata.get("AFFineTuneAdj") or 0
+            exposure = metadata.get("EXIF:ExposureTime") or metadata.get("ExposureTime")
             if isinstance(exposure, (int, float)):
                 exposure_str = f"1/{round(1/exposure)}" if 0 < exposure < 1 else str(exposure)
             else:
@@ -311,14 +232,16 @@ def extract_exif_data(file_path: str) -> dict:
 
             return {
                 "metadata": metadata, "camera": camera, "lens": lens,
-                "af_fine_tune": str(af_fine_tune), "f_number": metadata.get("EXIF:FNumber", "N/A"),
-                "exposure_time": exposure_str, "iso": metadata.get("EXIF:ISO", 100),
-                "focal_length": metadata.get("EXIF:FocalLength", "N/A")
+                "af_fine_tune": str(af_fine_tune), 
+                "f_number": metadata.get("EXIF:FNumber") or metadata.get("FNumber") or "N/A",
+                "exposure_time": exposure_str, 
+                "iso": metadata.get("EXIF:ISO") or metadata.get("ISO") or 100,
+                "focal_length": metadata.get("EXIF:FocalLength") or metadata.get("FocalLength") or "N/A"
             }
     except Exception as e:
         logger.error(f"ExifTool Error: {e}")
         return {
-            "metadata": {}, "camera": "Nikon D810", "lens": "Sigma 10-20mm f/4-5.6 EX DC HSM",
+            "metadata": {}, "camera": "Nikon D810", "lens": "N/A",
             "af_fine_tune": "0", "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
         }
 
@@ -334,16 +257,13 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
 
-    # 1. พิกัดจุดโฟกัสจริงจากกล้อง (กากบาทสีน้ำเงิน)
     af_point_text, raw_cx, raw_cy = parse_nikon_precise_af(metadata, w, h)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # 2. ค้นหาจุดคมชัดสูงสุดจริงบนภาพ (ดาวสีแดง / Peak Sharpness Point)
     opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//5)
 
-    # 3. ขยายกรอบ ROI เพิ่ม 20% รอบจุดที่ชัดที่สุด (Peak Sharpness Point)
     base_box_size = min(w, h) // 8
     expanded_box_size = int(base_box_size * 1.20)
     
