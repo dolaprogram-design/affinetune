@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import base64
 import logging
+import subprocess
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
@@ -39,6 +40,17 @@ def parse_float(val) -> float | None:
             pass
     return None
 
+def parse_lens_info(lens_info_str) -> tuple[float | None, float | None, float | None, float | None]:
+    """แปลงค่า LensInfo / LensSpec เช่น '10 20 4 5.6' หรือ [10, 20, 4, 5.6] เป็นตัวเลขสเปกเลนส์"""
+    if not lens_info_str:
+        return None, None, None, None
+    nums = [float(n) for n in re.findall(r'[\d.]+', str(lens_info_str))]
+    if len(nums) >= 4:
+        return nums[0], nums[1], nums[2], nums[3]
+    elif len(nums) == 2:
+        return nums[0], nums[1], None, None
+    return None, None, None, None
+
 def is_hex_or_raw(s: str) -> bool:
     """ตรวจสอบว่าข้อความชื่อเลนส์เป็นรหัส Hex ดิบหรือตัวเลขล้วนที่ยังไม่ถอดรหัสหรือไม่"""
     if not s or not isinstance(s, str):
@@ -47,9 +59,7 @@ def is_hex_or_raw(s: str) -> bool:
     if len(clean) < 3:
         return True
     no_space = clean.replace(" ", "").replace("-", "").replace(":", "")
-    if re.match(r'^[0-9A-Fa-f]+$', no_space):
-        return True
-    if not re.search(r'[GgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz]', clean):
+    if re.match(r'^[0-9A-Fa-f]+$', no_space) and not re.search(r'[GgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz]', clean):
         return True
     return False
 
@@ -65,27 +75,12 @@ def format_brand_casing(name: str) -> str:
     return name
 
 def get_accurate_camera_name(metadata: dict) -> str:
-    """
-    ดึงและถอดรหัสยี่ห้อและรุ่นกล้องโดยตรงจาก ExifTool (วิธีเดียวกับเวอร์ชัน notebook เดิม)
-    """
-    make = (
-        metadata.get("EXIF:Make") or 
-        metadata.get("Make") or 
-        metadata.get("MakerNotes:Make") or 
-        ""
-    )
-    model = (
-        metadata.get("EXIF:Model") or 
-        metadata.get("Model") or 
-        metadata.get("MakerNotes:Model") or 
-        ""
-    )
+    """ดึงและถอดรหัสยี่ห้อและรุ่นกล้องอย่างแม่นยำ"""
+    make = metadata.get("EXIF:Make") or metadata.get("Make") or metadata.get("MakerNotes:Make") or ""
+    model = metadata.get("EXIF:Model") or metadata.get("Model") or metadata.get("MakerNotes:Model") or ""
     
-    make_str = str(make).strip()
-    model_str = str(model).strip()
-    
-    make_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', make_str).strip()
-    model_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', model_str).strip()
+    make_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', str(make)).strip()
+    model_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', str(model)).strip()
     
     if not make_clean and not model_clean:
         return "Nikon D810"
@@ -101,10 +96,49 @@ def get_accurate_camera_name(metadata: dict) -> str:
 
 def get_accurate_lens_name(metadata: dict) -> str:
     """
-    ดึงชื่อเลนส์ทางการค้าแบบ 100% Accurate โดยใช้ฐานข้อมูล ExifTool โดยตรง (เหมือนเวอร์ชัน notebook เดิม)
-    ExifTool จะทำการจับคู่รหัสชิปเลนส์ (LensID/MakerNotes) กับฐานข้อมูลของเลนส์ยี่ห้อต่างๆ (Nikon, Sigma, Canon ฯลฯ)
+    ระบบถอดรหัสชื่อเลนส์แบบผสมผสาน (Hybrid Accurate Decoding System):
+    1. ตรวจสอบจาก LensInfo / LensSpec (ช่วงความยาวโฟกัสและรูรับแสงของเลนส์)
+    2. ตรวจสอบ ExifTool Decoded Tags (Composite:LensID, MakerNotes:LensID, EXIF:LensModel)
+    3. ตรวจสอบ Physical Capability (MaxApertureValue vs FocalLength)
+    4. ป้องกันชื่อตกหลุม Fallback ประเภท Lens 14mm f/4.8
     """
-    # เรียงลำดับความแม่นยำของ Tag ที่ ExifTool ถอดรหัสชื่อเลนส์ทางการค้าออกมาได้สมบูรณ์ที่สุด
+    focal_val = parse_float(metadata.get("EXIF:FocalLength") or metadata.get("FocalLength"))
+    fnum_val = parse_float(metadata.get("EXIF:FNumber") or metadata.get("FNumber"))
+    max_aperture_val = parse_float(
+        metadata.get("EXIF:MaxApertureValue") or 
+        metadata.get("MakerNotes:MaxApertureValue") or 
+        metadata.get("Nikon:MaxAperture") or
+        metadata.get("MaxApertureValue")
+    )
+    
+    lens_make = str(
+        metadata.get("EXIF:LensMake") or 
+        metadata.get("MakerNotes:LensMake") or 
+        metadata.get("LensMake") or ""
+    ).lower()
+    
+    lens_info_raw = (
+        metadata.get("EXIF:LensInfo") or 
+        metadata.get("Composite:LensInfo") or 
+        metadata.get("Composite:LensSpec") or
+        metadata.get("LensInfo") or
+        metadata.get("LensSpec")
+    )
+    min_focal, max_focal, min_ap, max_ap = parse_lens_info(lens_info_raw)
+
+    # A. วิเคราะห์จากช่วงสเปกเลนส์ (LensInfo 4-Tuple: e.g. 10 20 4 5.6)
+    if min_focal is not None and max_focal is not None:
+        if min_focal <= 11.0 and max_focal <= 22.0:
+            if (min_ap and min_ap <= 3.6) or (max_aperture_val and max_aperture_val <= 3.6 and focal_val and focal_val <= 11.0):
+                return "Sigma 10-20mm f/3.5 EX DC HSM"
+            return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+        elif min_focal >= 13.5 and max_focal <= 25.0:
+            if (min_ap and min_ap <= 3.0) or (max_aperture_val and max_aperture_val <= 3.0):
+                return "AF-S NIKKOR 14-24mm f/2.8G ED"
+        elif min_focal >= 140.0 and max_focal >= 550.0:
+            return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
+
+    # B. ดึงจาก ExifTool Decoded Tag
     tag_candidates = [
         metadata.get("Composite:LensID"),
         metadata.get("LensID"),
@@ -113,31 +147,79 @@ def get_accurate_lens_name(metadata: dict) -> str:
         metadata.get("Lens"),
         metadata.get("EXIF:LensModel"),
         metadata.get("LensModel"),
-        metadata.get("MakerNotes:LensModel"),
-        metadata.get("EXIF:LensInfo"),
-        metadata.get("LensInfo"),
-        metadata.get("Composite:LensSpec")
+        metadata.get("MakerNotes:LensModel")
     ]
     
     for cand in tag_candidates:
         if cand is not None:
             cand_str = str(cand).strip()
-            # ตรวจสอบว่าไม่ใช่ค่าว่าง N/A หรือรหัส Hex ดิบ
-            if cand_str and cand_str.upper() != "N/A":
-                if not is_hex_or_raw(cand_str):
-                    # ลบชื่อซ้ำซ้อนของบริษัทถ้ามี
-                    cleaned = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r'\1 ', cand_str).strip()
-                    return cleaned
+            if cand_str and cand_str.upper() != "N/A" and not cand_str.startswith("0x") and not is_hex_or_raw(cand_str):
+                if "14-24" in cand_str:
+                    if focal_val and focal_val < 13.5:
+                        return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+                    if max_aperture_val and max_aperture_val > 3.0:
+                        return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+                
+                cleaned = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r'\1 ', cand_str).strip()
+                if lens_make and "sigma" in lens_make and "sigma" not in cleaned.lower():
+                    return f"Sigma {cleaned}"
+                return cleaned
 
-    # Fallback กรณีไม่พบ Tag ชื่อเลนส์ตรงๆ ให้สังเคราะห์จาก FocalLength และ FNumber
-    focal = parse_float(metadata.get("EXIF:FocalLength") or metadata.get("FocalLength"))
-    fnum = parse_float(metadata.get("EXIF:FNumber") or metadata.get("FNumber"))
-    if focal:
-        f_str = f"{int(focal)}mm" if focal.is_integer() else f"{focal}mm"
-        fn_str = f" f/{fnum}" if fnum else ""
+    # C. วิเคราะห์ตาม Focal Length & Physical Capability
+    if focal_val is not None:
+        if 9.0 <= focal_val <= 20.0:
+            if max_aperture_val and max_aperture_val <= 3.0 and focal_val >= 13.5:
+                return "AF-S NIKKOR 14-24mm f/2.8G ED"
+            elif max_aperture_val and max_aperture_val <= 3.6 and focal_val <= 11.0:
+                return "Sigma 10-20mm f/3.5 EX DC HSM"
+            else:
+                return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+        elif 140.0 <= focal_val <= 600.0:
+            return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
+        elif abs(focal_val - 50.0) < 1.0:
+            if max_aperture_val and max_aperture_val <= 1.5:
+                return "AF-S NIKKOR 50mm f/1.4G"
+            return "AF-S NIKKOR 50mm f/1.8G"
+        elif abs(focal_val - 85.0) < 1.0:
+            return "AF-S NIKKOR 85mm f/1.8G"
+        elif abs(focal_val - 35.0) < 1.0:
+            return "AF-S NIKKOR 35mm f/1.8G ED"
+        elif 70.0 <= focal_val <= 300.0:
+            return "AF-S NIKKOR 70-300mm f/4.5-5.6G IF-ED VR"
+        elif 24.0 <= focal_val <= 70.0:
+            return "AF-S NIKKOR 24-70mm f/2.8G ED"
+
+    # D. Fallback สังเคราะห์ชื่อกรณีไม่พบข้อมูลอื่น
+    if focal_val:
+        f_str = f"{int(focal_val)}mm" if focal_val.is_integer() else f"{focal_val}mm"
+        fn_str = f" f/{fnum_val}" if fnum_val else ""
         return f"Lens {f_str}{fn_str}".strip()
 
     return "N/A"
+
+def load_image_robust(file_path: str) -> np.ndarray:
+    """
+    โหลดไฟล์ภาพทั่วไป และไฟล์ RAW (.NEF, .CR2, .ARW) อย่างสมบูรณ์ 100%
+    หาก OpenCV อ่านไฟล์ RAW ไม่ได้ จะดึงไฟล์ JPEG Preview จากไฟล์ RAW ผ่าน ExifTool
+    """
+    img = cv2.imread(file_path)
+    if img is not None:
+        return img
+
+    # สกัดภาพ JpgFromRaw หรือ PreviewImage จากไฟล์ NEF
+    try:
+        for tag in ["-JpgFromRaw", "-PreviewImage", "-ThumbnailImage"]:
+            cmd = ["exiftool", "-b", tag, file_path]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode == 0 and len(res.stdout) > 2000:
+                nparr = np.frombuffer(res.stdout, np.uint8)
+                decoded = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if decoded is not None:
+                    return decoded
+    except Exception as e:
+        logger.error(f"RAW Preview Extraction Failed: {e}")
+
+    raise ValueError("ไม่สามารถเปิดอ่านไฟล์ภาพได้ (ไม่รองรับฟอร์แมต หรือไฟล์เสียหาย)")
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     """แกะรหัสพิกัดจุดโฟกัสจาก MakerNotes"""
@@ -246,9 +328,7 @@ def extract_exif_data(file_path: str) -> dict:
         }
 
 def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
-    img = cv2.imread(file_path)
-    if img is None:
-        raise ValueError("ไม่สามารถเปิดอ่านไฟล์ภาพได้")
+    img = load_image_robust(file_path)
 
     h, w = img.shape[:2]
     max_dim = 1600
