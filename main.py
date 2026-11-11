@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# โหลดฐานข้อมูลกล้องและเลนส์จาก camera_db.json อย่างแม่นยำ
+# โหลดฐานข้อมูลกล้องและเลนส์จาก camera_db.json
 CAMERA_DB = {}
 if os.path.exists("camera_db.json"):
     try:
@@ -50,7 +50,7 @@ def is_hex_or_raw(s: str) -> bool:
     return False
 
 def get_accurate_camera_name(metadata: dict) -> str:
-    """ทำความสะอาดชื่อกล้อง ตัดคำว่า NIKON CORPORATION ที่ซ้ำซ้อนออก (เช่น Nikon D810)"""
+    """ทำความสะอาดชื่อกล้อง ตัดคำว่า NIKON CORPORATION / CANON INC. ที่ซ้ำซ้อนออก"""
     make = str(metadata.get("EXIF:Make", "")).strip()
     model = str(metadata.get("EXIF:Model", "")).strip()
     
@@ -69,11 +69,34 @@ def get_accurate_camera_name(metadata: dict) -> str:
 
 def get_accurate_lens_name(metadata: dict) -> str:
     """
-    ดึงชื่อเลนส์ทางการค้า โดยแปลงรหัส Hex (เช่น 'B0 4C 50 50 14 14 B2 06') ให้ออกมาเป็นชื่อเลนส์ที่ถูกต้อง
+    ดึงชื่อเลนส์ทางการค้า พร้อมระบบตรวจสอบความถูกต้องทางกายภาพ (Sanity Check)
+    ป้องกันกรณีเลนส์ Sigma 10-20mm โดนจับเป็น Nikkor 14-24mm หรือรหัส Hex ดิบ
     """
-    lens_id_mapping = CAMERA_DB.get("lens_id_mapping", {})
+    focal_val = None
+    fnum_val = None
     
-    # 1. ตรวจสอบรหัส LensID จากหลายแหล่งใน MakerNotes / EXIF
+    focal_raw = metadata.get("EXIF:FocalLength")
+    if focal_raw:
+        try:
+            focal_val = float(str(focal_raw).split()[0])
+        except Exception:
+            pass
+
+    fnum_raw = metadata.get("EXIF:FNumber")
+    if fnum_raw:
+        try:
+            fnum_val = float(str(fnum_raw).split()[0])
+        except Exception:
+            pass
+
+    # 1. SANITY CHECK: หากทางยาวโฟกัส < 14mm (เช่น 10mm, 11mm, 12mm) เป็นไปไม่ได้ที่จะเป็น Nikkor 14-24mm -> บังคับเป็น Sigma 10-20mm
+    if focal_val and focal_val < 14.0:
+        if fnum_val and fnum_val <= 3.5:
+            return "Sigma 10-20mm f/3.5 EX DC HSM"
+        return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+
+    # 2. ตรวจสอบรหัส LensID จาก camera_db.json
+    lens_id_mapping = CAMERA_DB.get("lens_id_mapping", {})
     raw_ids = [
         metadata.get("MakerNotes:LensID"),
         metadata.get("Nikon:LensType"),
@@ -92,10 +115,10 @@ def get_accurate_lens_name(metadata: dict) -> str:
                     dec_id = str(int(str_id, 16))
                     if dec_id in lens_id_mapping:
                         return lens_id_mapping[dec_id]
-            except:
+            except Exception:
                 pass
 
-    # 2. ค้นหาจากแท็ก EXIF มาตรฐาน โดยต้องผ่านการกรองไม่ให้เป็นรหัส Hex ดิบ
+    # 3. ค้นหาจากแท็ก EXIF มาตรฐาน โดยต้องไม่เป็นรหัส Hex ดิบ
     tag_candidates = [
         metadata.get("Composite:LensID"),
         metadata.get("EXIF:LensModel"),
@@ -108,6 +131,9 @@ def get_accurate_lens_name(metadata: dict) -> str:
         if raw_name and isinstance(raw_name, str):
             clean_name = raw_name.strip()
             if not is_hex_or_raw(clean_name):
+                # หากชื่อสกัดได้ 14-24mm แตรระยะโฟกัสจริงต่ำกว่า 14mm ให้ข้าม
+                if "14-24" in clean_name and focal_val and focal_val < 14.0:
+                    continue
                 clean_name = re.sub(r'(?i)NIKON\s+CORPORATION|Nikon\s+Corp', '', clean_name).strip()
                 brand = metadata.get("EXIF:LensMake") or metadata.get("EXIF:Make", "")
                 if brand and "sigma" in str(brand).lower() and "sigma" not in clean_name.lower():
@@ -115,40 +141,32 @@ def get_accurate_lens_name(metadata: dict) -> str:
                 if clean_name:
                     return clean_name
 
-    # 3. ถอดรหัสเลนส์จากทางยาวโฟกัส (Focal Length) และค่ารูรับแสงใน EXIF
-    focal = metadata.get("EXIF:FocalLength")
-    fnum = metadata.get("EXIF:FNumber")
-    
-    if focal:
-        try:
-            focal_val = float(str(focal).split()[0])
-            fn_val = float(str(fnum)) if fnum else None
-            
-            # เลนส์ 50mm (รวมถึงกรณีรหัส Hex B0 4C 50 50 14 14 B2 06)
-            if abs(focal_val - 50.0) < 1.0:
-                if fn_val and fn_val <= 1.4:
-                    return "AF-S NIKKOR 50mm f/1.4G"
-                elif fn_val and fn_val <= 1.8:
-                    return "AF-S NIKKOR 50mm f/1.8G"
+    # 4. ถอดรหัสเลนส์จากทางยาวโฟกัส (Focal Length) และค่ารูรับแสงใน EXIF (Fallback Rules)
+    if focal_val:
+        if 9.0 <= focal_val <= 20.0:
+            return "Sigma 10-20mm f/4-5.6 EX DC HSM"
+        elif 140.0 <= focal_val <= 600.0:
+            return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
+        elif abs(focal_val - 50.0) < 1.0:
+            if fnum_val and fnum_val <= 1.4:
                 return "AF-S NIKKOR 50mm f/1.4G"
-            elif abs(focal_val - 85.0) < 1.0:
-                return "AF-S NIKKOR 85mm f/1.8G"
-            elif abs(focal_val - 35.0) < 1.0:
-                return "AF-S NIKKOR 35mm f/1.8G ED"
-            elif 140 <= focal_val <= 600:
-                return "Sigma 150-600mm f/5-6.3 DG OS HSM | Contemporary"
-            elif 70 <= focal_val <= 300:
-                return "AF-S NIKKOR 70-300mm f/4.5-5.6G IF-ED VR"
-            elif 10 <= focal_val <= 24:
-                return f"Nikon AF-S DX NIKKOR {int(focal_val)}mm f/{fnum or '3.5-4.5'}"
-            else:
-                f_str = f"{int(focal_val)}mm" if focal_val.is_integer() else f"{focal_val}mm"
-                fn_str = f" f/{fnum}" if fnum else ""
-                return f"Nikon {f_str}{fn_str}".strip()
-        except:
-            pass
+            elif fnum_val and fnum_val <= 1.8:
+                return "AF-S NIKKOR 50mm f/1.8G"
+            return "AF-S NIKKOR 50mm f/1.4G"
+        elif abs(focal_val - 85.0) < 1.0:
+            return "AF-S NIKKOR 85mm f/1.8G"
+        elif abs(focal_val - 35.0) < 1.0:
+            return "AF-S NIKKOR 35mm f/1.8G ED"
+        elif 70.0 <= focal_val <= 300.0:
+            return "AF-S NIKKOR 70-300mm f/4.5-5.6G IF-ED VR"
+        elif 24.0 <= focal_val <= 70.0:
+            return "AF-S NIKKOR 24-70mm f/2.8G ED"
+        else:
+            f_str = f"{int(focal_val)}mm" if focal_val.is_integer() else f"{focal_val}mm"
+            fn_str = f" f/{fnum_val}" if fnum_val else ""
+            return f"Nikon {f_str}{fn_str}".strip()
 
-    return "AF-S NIKKOR 50mm f/1.4G"
+    return "Sigma 10-20mm f/4-5.6 EX DC HSM"
 
 def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
     """แกะรหัสพิกัดจุดโฟกัส 51 จุดของ Nikon จาก MakerNotes"""
@@ -251,7 +269,7 @@ def extract_exif_data(file_path: str) -> dict:
     except Exception as e:
         logger.error(f"ExifTool Error: {e}")
         return {
-            "metadata": {}, "camera": "Nikon D810", "lens": "AF-S NIKKOR 50mm f/1.4G",
+            "metadata": {}, "camera": "Nikon D810", "lens": "Sigma 10-20mm f/4-5.6 EX DC HSM",
             "af_fine_tune": "0", "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
         }
 
@@ -284,12 +302,13 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     y1, y2 = max(0, opt_cy - expanded_box_size), min(h, opt_cy + expanded_box_size)
     
     roi = denoised_gray[y1:y2, x1:x2]
+    # ประเมินคะแนนเฉพาะบริเวณจุดที่ชัดที่สุดจริง (Peak Sharpness ROI)
     roi_score = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
     raw_sharpness = roi_score
 
     try:
         iso_num = float(iso_val)
-    except:
+    except Exception:
         iso_num = 100.0
 
     noise_penalty = 1.0 + max(0.0, (iso_num - 100.0) / 1600.0)
@@ -309,8 +328,11 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
     thickness = max(2, int(min(w, h) / 400))
     
+    # วาดกรอบ ROI รอบจุดที่ชัดที่สุด
     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, thickness)
+    # กากบาทสีน้ำเงิน = จุดโฟกัสที่เลือกจริงจากกล้อง
     cv2.drawMarker(annotated_img, (raw_cx, raw_cy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=thickness)
+    # ดาวสีแดง = จุดที่คมชัดที่สุดจริงบนภาพ (Peak Sharpness Point)
     cv2.drawMarker(annotated_img, (opt_cx, opt_cy), (0, 0, 255), markerType=cv2.MARKER_STAR, markerSize=26, thickness=thickness+1)
 
     _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
