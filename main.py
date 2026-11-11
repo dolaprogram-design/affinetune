@@ -89,54 +89,59 @@ def get_accurate_camera_name(metadata: dict) -> str:
         
     return format_brand_casing(f"{make_clean} {model_clean}")
 
+def format_aperture(max_ap):
+    if not max_ap:
+        return ""
+    try:
+        ap_val = float(max_ap)
+        ap_rounded = round(ap_val, 1)
+        ap_str = str(int(ap_rounded)) if ap_rounded.is_integer() else str(ap_rounded)
+        return f" f/{ap_str}"
+    except:
+        return ""
+
 def get_accurate_lens_name(metadata: dict) -> str:
-    focal_val = metadata.get("EXIF:FocalLength") or metadata.get("FocalLength")
-    if focal_val:
-        try: focal_val = float(focal_val)
-        except: focal_val = None
+    focal_val = parse_float(metadata.get("EXIF:FocalLength") or metadata.get("FocalLength"))
         
     tag_candidates = [
+        metadata.get("Composite:LensID"),
+        metadata.get("LensID"),
+        metadata.get("MakerNotes:LensID"),
         metadata.get("EXIF:LensModel"),
         metadata.get("LensModel"),
-        metadata.get("MakerNotes:Lens"),
-        metadata.get("EXIF:Lens"),
-        metadata.get("Lens"),
-        metadata.get("Composite:LensID"), 
-        metadata.get("LensID"),
-        metadata.get("MakerNotes:LensID")
+        metadata.get("EXIF:LensInfo")
     ]
     
+    lens_name = None
     for cand in tag_candidates:
-        if cand is not None:
+        if cand and str(cand).strip() and str(cand).upper() != "N/A" and not is_hex_or_raw(str(cand)):
             cand_str = str(cand).strip()
-            if cand_str and cand_str.upper() != "N/A" and not is_hex_or_raw(cand_str):
-                # Sanity check: Exclude wrong tags (e.g. 50mm tagged for an 80mm shot)
-                if focal_val:
-                    nums = [float(n) for n in re.findall(r'(?<!f/) (\d+) ', cand_str.lower().replace('mm', ' '))]
-                    if nums:
-                        min_f, max_f = min(nums), max(nums)
-                        if focal_val > max_f * 1.15 or focal_val < min_f * 0.85:
-                            continue 
-                
-                cleaned = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r' ', cand_str).strip()
-                return cleaned
+            
+            if focal_val:
+                match_focals = re.findall(r' (\d{1,3})(?:mm)? ', cand_str.lower().split('f/')[0].split('f')[0])
+                if match_focals:
+                    nums = [float(n) for n in match_focals]
+                    min_f, max_f = min(nums), max(nums)
+                    if focal_val > max_f * 1.15 or focal_val < min_f * 0.85:
+                        continue 
+
+            lens_name = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r' ', cand_str).strip()
+            break
+
+    if lens_name:
+        return lens_name
 
     lens_info = metadata.get("EXIF:LensInfo") or metadata.get("LensInfo")
     min_f, max_f, min_a, max_a = parse_lens_info(lens_info)
     if min_f and max_f:
         f_str = f"{int(min_f)}-{int(max_f)}mm" if min_f != max_f else f"{int(min_f)}mm"
-        if min_a and max_a:
-            a_str = f"f/{min_a}-{max_a}" if min_a != max_a else f"f/{min_a}"
-        elif min_a:
-            a_str = f"f/{min_a}"
-        else:
-            a_str = ""
+        a_str = f"f/{min_a}-{max_a}" if min_a and max_a and min_a != max_a else (f"f/{min_a}" if min_a else "")
         return f"Lens {f_str} {a_str}".strip()
 
     if focal_val:
         max_ap = metadata.get("EXIF:MaxApertureValue") or metadata.get("MaxApertureValue")
         f_str = f"{int(focal_val)}mm" if float(focal_val).is_integer() else f"{focal_val}mm"
-        a_str = f" f/{max_ap}" if max_ap else ""
+        a_str = format_aperture(max_ap)
         return f"Unknown Lens {f_str}{a_str}".strip()
 
     return "N/A"
@@ -246,11 +251,15 @@ def extract_exif_data(file_path: str) -> dict:
                 exposure_str = f"1/{round(1/exposure)}" if 0 < exposure < 1 else str(exposure)
             else:
                 exposure_str = str(exposure) if exposure else "N/A"
+            
+            # Formatted FNumber
+            f_num = metadata.get("EXIF:FNumber") or metadata.get("FNumber")
+            f_number_str = f"f/{f_num}" if f_num else "N/A"
 
             return {
                 "metadata": metadata, "camera": camera, "lens": lens,
                 "af_fine_tune": str(af_fine_tune), 
-                "f_number": metadata.get("EXIF:FNumber") or metadata.get("FNumber") or "N/A",
+                "f_number": f_number_str,
                 "exposure_time": exposure_str, 
                 "iso": metadata.get("EXIF:ISO") or metadata.get("ISO") or 100,
                 "focal_length": metadata.get("EXIF:FocalLength") or metadata.get("FocalLength") or "N/A"
@@ -278,15 +287,23 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     af_point_text, raw_cx, raw_cy = parse_nikon_precise_af(metadata, w, h)
     opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//5)
     
-    # === การจัดองค์ประกอบภาพ: ตรวจจับใบหน้า ===
-    face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    # === การจัดองค์ประกอบภาพ: ตรวจจับใบหน้าและบุคคล ===
     faces = []
+    
+    # 1. ลองใช้ Frontal Face (ค่าเริ่มต้น) ปรับแต่งให้ไวขึ้น (ลด scaleFactor และ minNeighbors)
+    face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
     if os.path.exists(face_cascade_path):
         face_cascade = cv2.CascadeClassifier(face_cascade_path)
-        faces = face_cascade.detectMultiScale(denoised_gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+        faces = face_cascade.detectMultiScale(denoised_gray, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20))
+        
+    # 2. ถ้าไม่เจอหน้าตรง ลองใช้ Profile Face (หน้าด้านข้าง)
+    if len(faces) == 0:
+        profile_cascade_path = cv2.data.haarcascades + 'haarcascade_profileface.xml'
+        if os.path.exists(profile_cascade_path):
+            profile_cascade = cv2.CascadeClassifier(profile_cascade_path)
+            faces = profile_cascade.detectMultiScale(denoised_gray, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20))
 
     if len(faces) > 0:
-        # เลือกใบหน้าที่ใหญ่ที่สุดเป็นองค์ประกอบหลัก
         faces = sorted(faces, key=lambda x: x[2]*x[3], reverse=True)
         fx, fy, fw, fh = faces[0]
         
@@ -295,9 +312,9 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
         
         x1, y1, x2, y2 = fx, fy, fx+fw, fy+fh
         opt_cx, opt_cy = fx + fw//2, fy + fh//2
-        composition_summary = "📸 องค์ประกอบภาพ: ตรวจพบตัวบุคคล (วัดความคมชัดจากบริเวณใบหน้าหลัก)"
+        composition_summary = "📸 องค์ประกอบภาพ: ตรวจพบตัวบุคคล (วัดความคมชัดจากบริเวณใบหน้า/ศีรษะหลัก)"
     else:
-        # กรณีไม่มีบุคคล กลับไปใช้ AF Point จากกล้อง
+        # กรณีไม่มีบุคคล
         base_box_size = min(w, h) // 8
         expanded_box_size = int(base_box_size * 1.20)
         
