@@ -89,59 +89,66 @@ def get_accurate_camera_name(metadata: dict) -> str:
         
     return format_brand_casing(f"{make_clean} {model_clean}")
 
-def get_accurate_lens_name(metadata: dict) -> str:
+ddef get_accurate_lens_name(metadata: dict) -> str:
     focal_val = metadata.get("EXIF:FocalLength") or metadata.get("FocalLength")
-    if focal_val:
-        try: focal_val = float(focal_val)
-        except: focal_val = None
+    try:
+        focal_val = float(focal_val) if focal_val else None
+    except:
+        focal_val = None
         
     tag_candidates = [
+        metadata.get("Composite:LensID"),
+        metadata.get("LensID"),
         metadata.get("EXIF:LensModel"),
         metadata.get("LensModel"),
-        metadata.get("MakerNotes:Lens"),
-        metadata.get("EXIF:Lens"),
-        metadata.get("Lens"),
-        metadata.get("Composite:LensID"), 
-        metadata.get("LensID"),
-        metadata.get("MakerNotes:LensID")
+        metadata.get("EXIF:LensInfo"),
     ]
     
+    lens_name = None
     for cand in tag_candidates:
-        if cand is not None:
+        if cand and str(cand).strip() and str(cand).upper() != "N/A" and not is_hex_or_raw(str(cand)):
             cand_str = str(cand).strip()
-            if cand_str and cand_str.upper() != "N/A" and not is_hex_or_raw(cand_str):
-                # Sanity check: Exclude wrong tags (e.g. 50mm tagged for an 80mm shot)
-                if focal_val:
-                    nums = [float(n) for n in re.findall(r'(?<!f/) (\d+) ', cand_str.lower().replace('mm', ' '))]
-                    if nums:
-                        min_f, max_f = min(nums), max(nums)
-                        if focal_val > max_f * 1.15 or focal_val < min_f * 0.85:
-                            continue 
-                
-                cleaned = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r' ', cand_str).strip()
-                return cleaned
+            
+            # ตรวจสอบชื่อที่ขัดแย้งกับระยะถ่ายจริง (ป้องกันเลนส์ 50mm แทรกในภาพ 80mm)
+            if focal_val:
+                match_focals = re.findall(r'\b(\d{1,3})(?:mm)?\b', cand_str.lower().split('f/')[0].split('f')[0])
+                if match_focals:
+                    nums = [float(n) for n in match_focals]
+                    min_f, max_f = min(nums), max(nums)
+                    # ถ้าระยะถ่ายจริงอยู่นอกระยะสเปกเลนส์ (ให้ระยะเผื่อ 15%) แปลว่า Tag นี้ข้อมูลมั่ว ให้ข้ามไป
+                    if focal_val > max_f * 1.15 or focal_val < min_f * 0.85:
+                        continue 
 
+            lens_name = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r' ', cand_str).strip()
+            break
+
+    if lens_name:
+        return lens_name
+
+    # Fallback 1: สร้างชื่อจาก LensInfo ถ้า Tag หลักใช้งานไม่ได้
     lens_info = metadata.get("EXIF:LensInfo") or metadata.get("LensInfo")
     min_f, max_f, min_a, max_a = parse_lens_info(lens_info)
     if min_f and max_f:
         f_str = f"{int(min_f)}-{int(max_f)}mm" if min_f != max_f else f"{int(min_f)}mm"
-        if min_a and max_a:
-            a_str = f"f/{min_a}-{max_a}" if min_a != max_a else f"f/{min_a}"
-        elif min_a:
-            a_str = f"f/{min_a}"
-        else:
-            a_str = ""
+        a_str = f"f/{min_a}-{max_a}" if min_a and max_a and min_a != max_a else (f"f/{min_a}" if min_a else "")
         return f"Lens {f_str} {a_str}".strip()
 
+    # Fallback 2: กรณีไม่มีข้อมูลเลย ให้ใช้ระยะและรูรับแสงที่ถ่าย (พร้อมปัดเศษทศนิยม)
     if focal_val:
         max_ap = metadata.get("EXIF:MaxApertureValue") or metadata.get("MaxApertureValue")
         f_str = f"{int(focal_val)}mm" if float(focal_val).is_integer() else f"{focal_val}mm"
-        a_str = f" f/{max_ap}" if max_ap else ""
+        
+        a_str = ""
+        if max_ap:
+            try:
+                ap_rounded = round(float(max_ap), 1)
+                ap_str = str(int(ap_rounded)) if ap_rounded.is_integer() else str(ap_rounded)
+                a_str = f" f/{ap_str}"
+            except:
+                pass
         return f"Unknown Lens {f_str}{a_str}".strip()
 
-    return "N/A"
-
-def load_image_robust(file_path: str) -> np.ndarray:
+    return "N/A"def load_image_robust(file_path: str) -> np.ndarray:
     img = cv2.imread(file_path)
     if img is not None:
         return img
