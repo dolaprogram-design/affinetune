@@ -1,403 +1,279 @@
+import streamlit as st
 import os
-import re
 import json
-import shutil
-import tempfile
-import base64
-import logging
-import subprocess
 import cv2
+import rawpy
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from exiftool import ExifToolHelper
+import pandas as pd
+import exiftool
+import tempfile
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from PIL import Image
+import io
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI(title="Pro Lens & Camera Analytics API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# --- ตั้งค่าหน้าเว็บ Streamlit ---
+st.set_page_config(
+    page_title="RAW Image Analytics Dashboard",
+    page_icon="📸",
+    layout="wide"
 )
 
-def parse_float(val) -> float | None:
-    if val is None:
-        return None
-    if isinstance(val, (int, float)):
-        return float(val)
-    match = re.search(r'[\d.]+', str(val))
-    if match:
+# --- 1. จัดการระบบฐานข้อมูลกล้องและเลนส์จากไฟล์ JSON (Persistent Storage) ---
+DB_FILE = 'camera_db.json'
+
+def load_camera_db():
+    default_db = {
+        "Brands": ["Nikon", "Canon", "Sigma", "Tamron", "Samyang", "Tokina"],
+        "Models": ["NIKON D810", "NIKON D850", "NIKON D750", "Canon EOS 5D Mark IV", "Canon EOS 6D Mark II"]
+    }
+    if os.path.exists(DB_FILE):
         try:
-            return float(match.group(0))
+            with open(DB_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
         except Exception:
-            pass
-    return None
+            return default_db
+    return default_db
 
-def parse_lens_info(lens_info_str) -> tuple[float | None, float | None, float | None, float | None]:
-    if not lens_info_str:
-        return None, None, None, None
-    nums = [float(n) for n in re.findall(r'[\d.]+', str(lens_info_str))]
-    if len(nums) >= 4:
-        return nums[0], nums[1], nums[2], nums[3]
-    elif len(nums) == 2:
-        return nums[0], nums[1], None, None
-    return None, None, None, None
-
-def is_hex_or_raw(s: str) -> bool:
-    if not s or not isinstance(s, str):
+def save_camera_db(db_data):
+    try:
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(db_data, f, indent=2, ensure_ascii=False)
         return True
-    clean = s.strip()
-    if len(clean) < 3:
-        return True
-    no_space = clean.replace(" ", "").replace("-", "").replace(":", "")
-    if re.match(r'^[0-9A-Fa-f]+$', no_space) and not re.search(r'[GgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz]', clean):
-        return True
-    return False
-
-def format_brand_casing(name: str) -> str:
-    if not name:
-        return ""
-    name = re.sub(r'^ NIKON ', 'Nikon', name, flags=re.IGNORECASE)
-    name = re.sub(r'^ CANON ', 'Canon', name, flags=re.IGNORECASE)
-    name = re.sub(r'^ SONY ', 'Sony', name, flags=re.IGNORECASE)
-    name = re.sub(r'^ SIGMA ', 'Sigma', name, flags=re.IGNORECASE)
-    name = re.sub(r'^ TAMRON ', 'Tamron', name, flags=re.IGNORECASE)
-    return name
-
-def get_accurate_camera_name(metadata: dict) -> str:
-    make = metadata.get("EXIF:Make") or metadata.get("Make") or metadata.get("MakerNotes:Make") or ""
-    model = metadata.get("EXIF:Model") or metadata.get("Model") or metadata.get("MakerNotes:Model") or ""
-    
-    make_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', str(make)).strip()
-    model_clean = re.sub(r'(?i)\s*(CORPORATION|INC\.?|CO\.,\s*LTD\.?)\s*', '', str(model)).strip()
-    
-    if not make_clean and not model_clean:
-        return "Nikon D810"
-    if not make_clean:
-        return format_brand_casing(model_clean)
-    if not model_clean:
-        return format_brand_casing(make_clean)
-        
-    if model_clean.lower().startswith(make_clean.lower()):
-        return format_brand_casing(model_clean)
-        
-    return format_brand_casing(f"{make_clean} {model_clean}")
-
-def format_aperture(max_ap):
-    if not max_ap:
-        return ""
-    try:
-        ap_val = float(max_ap)
-        ap_rounded = round(ap_val, 1)
-        ap_str = str(int(ap_rounded)) if ap_rounded.is_integer() else str(ap_rounded)
-        return f" f/{ap_str}"
-    except:
-        return ""
-
-def get_accurate_lens_name(metadata: dict) -> str:
-    focal_val = parse_float(metadata.get("EXIF:FocalLength") or metadata.get("FocalLength"))
-        
-    tag_candidates = [
-        metadata.get("Composite:LensID"),
-        metadata.get("LensID"),
-        metadata.get("MakerNotes:LensID"),
-        metadata.get("EXIF:LensModel"),
-        metadata.get("LensModel"),
-        metadata.get("EXIF:LensInfo")
-    ]
-    
-    lens_name = None
-    for cand in tag_candidates:
-        if cand and str(cand).strip() and str(cand).upper() != "N/A" and not is_hex_or_raw(str(cand)):
-            cand_str = str(cand).strip()
-            
-            if focal_val:
-                match_focals = re.findall(r' (\d{1,3})(?:mm)? ', cand_str.lower().split('f/')[0].split('f')[0])
-                if match_focals:
-                    nums = [float(n) for n in match_focals]
-                    min_f, max_f = min(nums), max(nums)
-                    if focal_val > max_f * 1.15 or focal_val < min_f * 0.85:
-                        continue 
-
-            lens_name = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r' ', cand_str).strip()
-            break
-
-    if lens_name:
-        return lens_name
-
-    lens_info = metadata.get("EXIF:LensInfo") or metadata.get("LensInfo")
-    min_f, max_f, min_a, max_a = parse_lens_info(lens_info)
-    if min_f and max_f:
-        f_str = f"{int(min_f)}-{int(max_f)}mm" if min_f != max_f else f"{int(min_f)}mm"
-        a_str = f"f/{min_a}-{max_a}" if min_a and max_a and min_a != max_a else (f"f/{min_a}" if min_a else "")
-        return f"Lens {f_str} {a_str}".strip()
-
-    if focal_val:
-        max_ap = metadata.get("EXIF:MaxApertureValue") or metadata.get("MaxApertureValue")
-        f_str = f"{int(focal_val)}mm" if float(focal_val).is_integer() else f"{focal_val}mm"
-        a_str = format_aperture(max_ap)
-        return f"Unknown Lens {f_str}{a_str}".strip()
-
-    return "N/A"
-
-def load_image_robust(file_path: str) -> np.ndarray:
-    img = cv2.imread(file_path)
-    if img is not None:
-        return img
-    try:
-        for tag in ["-JpgFromRaw", "-PreviewImage", "-ThumbnailImage"]:
-            cmd = ["exiftool", "-b", tag, file_path]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if res.returncode == 0 and len(res.stdout) > 2000:
-                nparr = np.frombuffer(res.stdout, np.uint8)
-                decoded = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                if decoded is not None:
-                    return decoded
-    except Exception as e:
-        logger.error(f"RAW Preview Extraction Failed: {e}")
-    raise ValueError("ไม่สามารถเปิดอ่านไฟล์ภาพได้")
-
-def parse_nikon_precise_af(metadata: dict, img_w: int, img_h: int):
-    raw_af = (
-        metadata.get("Nikon:PrimaryAFPoint") or
-        metadata.get("MakerNotes:PrimaryAFPoint") or
-        metadata.get("PrimaryAFPoint") or
-        metadata.get("Nikon:AFPointsInFocus") or
-        metadata.get("Nikon:AFPointSelected") or
-        "Center"
-    )
-    af_text = str(raw_af).strip()
-    
-    pos = metadata.get("Nikon:AFPointPosition") or metadata.get("Composite:AFPointPosition") or metadata.get("AFPointPosition")
-    if pos:
-        try:
-            parts = [float(p) for p in str(pos).split()]
-            if len(parts) >= 2:
-                if 0 <= parts[0] <= 1.0 and 0 <= parts[1] <= 1.0:
-                    return af_text, int(parts[0] * img_w), int(parts[1] * img_h)
-        except Exception:
-            pass
-
-    af_upper = af_text.upper()
-    if "CENTER" in af_upper or not af_upper:
-        return af_text, img_w // 2, img_h // 2
-
-    norm_x, norm_y = 0.5, 0.5
-    if "FAR LEFT" in af_upper or "EXTREME LEFT" in af_upper:
-        norm_x = 0.15
-    elif "LEFT" in af_upper:
-        norm_x = 0.30 if "COL 1" in af_upper or "1" in af_upper else 0.38
-    elif "FAR RIGHT" in af_upper or "EXTREME RIGHT" in af_upper:
-        norm_x = 0.85
-    elif "RIGHT" in af_upper:
-        norm_x = 0.70 if "COL" in af_upper else 0.62
-
-    if "TOP" in af_upper or "UPPER" in af_upper or "ROW 1" in af_upper:
-        norm_y = 0.20
-    elif "LOWER TOP" in af_upper or "ROW 2" in af_upper:
-        norm_y = 0.35
-    elif "BOTTOM" in af_upper or "LOWER" in af_upper or "ROW 5" in af_upper:
-        norm_y = 0.80 if "EXTREME" in af_upper else 0.70
-
-    match_col = re.search(r'COL(?:UMN)?\s*(\d+)', af_upper)
-    match_row = re.search(r'ROW\s*(\d+)', af_upper)
-    if match_col:
-        norm_x = max(0.1, min(0.9, int(match_col.group(1)) / 15.0))
-    if match_row:
-        norm_y = max(0.1, min(0.9, int(match_row.group(1)) / 5.0))
-
-    return af_text, int(norm_x * img_w), int(norm_y * img_h)
-
-def find_optimal_sharpness_peak(gray_img, init_cx, init_cy, search_radius=120):
-    h, w = gray_img.shape
-    best_x, best_y = init_cx, init_cy
-    max_var = -1.0
-    
-    x_min = max(0, init_cx - search_radius)
-    x_max = min(w, init_cx + search_radius)
-    y_min = max(0, init_cy - search_radius)
-    y_max = min(h, init_cy + search_radius)
-    
-    step = max(4, search_radius // 15)
-    patch_size = 35
-    
-    for y in range(y_min, y_max, step):
-        for x in range(x_min, x_max, step):
-            patch = gray_img[max(0, y-patch_size):min(h, y+patch_size), max(0, x-patch_size):min(w, x+patch_size)]
-            if patch.size > 0:
-                var = cv2.Laplacian(patch, cv2.CV_64F).var()
-                if var > max_var:
-                    max_var = var
-                    best_x, best_y = x, y
-                    
-    return best_x, best_y
-
-def extract_exif_data(file_path: str) -> dict:
-    try:
-        with ExifToolHelper() as et:
-            metadata = et.get_metadata(file_path)[0]
-            camera = get_accurate_camera_name(metadata)
-            lens = get_accurate_lens_name(metadata)
-            
-            af_fine_tune = metadata.get("MakerNotes:AFTuneValue") or metadata.get("Nikon:AFTuneValue") or metadata.get("AFFineTuneAdj") or 0
-            exposure = metadata.get("EXIF:ExposureTime") or metadata.get("ExposureTime")
-            if isinstance(exposure, (int, float)):
-                exposure_str = f"1/{round(1/exposure)}" if 0 < exposure < 1 else str(exposure)
-            else:
-                exposure_str = str(exposure) if exposure else "N/A"
-            
-            # Formatted FNumber
-            f_num = metadata.get("EXIF:FNumber") or metadata.get("FNumber")
-            f_number_str = f"f/{f_num}" if f_num else "N/A"
-
-            return {
-                "metadata": metadata, "camera": camera, "lens": lens,
-                "af_fine_tune": str(af_fine_tune), 
-                "f_number": f_number_str,
-                "exposure_time": exposure_str, 
-                "iso": metadata.get("EXIF:ISO") or metadata.get("ISO") or 100,
-                "focal_length": metadata.get("EXIF:FocalLength") or metadata.get("FocalLength") or "N/A"
-            }
-    except Exception as e:
-        logger.error(f"ExifTool Error: {e}")
-        return {
-            "metadata": {}, "camera": "Nikon D810", "lens": "N/A",
-            "af_fine_tune": "0", "f_number": "N/A", "exposure_time": "N/A", "iso": 100, "focal_length": "N/A"
-        }
-
-def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
-    img = load_image_robust(file_path)
-
-    h, w = img.shape[:2]
-    max_dim = 1600
-    if max(h, w) > max_dim:
-        scale = max_dim / float(max(h, w))
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        h, w = img.shape[:2]
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    af_point_text, raw_cx, raw_cy = parse_nikon_precise_af(metadata, w, h)
-    opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//5)
-    
-    # === การจัดองค์ประกอบภาพ: ตรวจจับใบหน้าและบุคคล ===
-    faces = []
-    
-    # 1. ลองใช้ Frontal Face (ค่าเริ่มต้น) ปรับแต่งให้ไวขึ้น (ลด scaleFactor และ minNeighbors)
-    face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-    if os.path.exists(face_cascade_path):
-        face_cascade = cv2.CascadeClassifier(face_cascade_path)
-        faces = face_cascade.detectMultiScale(denoised_gray, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20))
-        
-    # 2. ถ้าไม่เจอหน้าตรง ลองใช้ Profile Face (หน้าด้านข้าง)
-    if len(faces) == 0:
-        profile_cascade_path = cv2.data.haarcascades + 'haarcascade_profileface.xml'
-        if os.path.exists(profile_cascade_path):
-            profile_cascade = cv2.CascadeClassifier(profile_cascade_path)
-            faces = profile_cascade.detectMultiScale(denoised_gray, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20))
-
-    if len(faces) > 0:
-        faces = sorted(faces, key=lambda x: x[2]*x[3], reverse=True)
-        fx, fy, fw, fh = faces[0]
-        
-        roi = denoised_gray[fy:fy+fh, fx:fx+fw]
-        raw_sharpness = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
-        
-        x1, y1, x2, y2 = fx, fy, fx+fw, fy+fh
-        opt_cx, opt_cy = fx + fw//2, fy + fh//2
-        composition_summary = "📸 องค์ประกอบภาพ: ตรวจพบตัวบุคคล (วัดความคมชัดจากบริเวณใบหน้า/ศีรษะหลัก)"
-    else:
-        # กรณีไม่มีบุคคล
-        base_box_size = min(w, h) // 8
-        expanded_box_size = int(base_box_size * 1.20)
-        
-        x1, x2 = max(0, opt_cx - expanded_box_size), min(w, opt_cx + expanded_box_size)
-        y1, y2 = max(0, opt_cy - expanded_box_size), min(h, opt_cy + expanded_box_size)
-        
-        roi = denoised_gray[y1:y2, x1:x2]
-        raw_sharpness = cv2.Laplacian(roi, cv2.CV_64F).var() if roi.size > 0 else 0
-        composition_summary = f"🎯 องค์ประกอบภาพ: ไม่มีตัวบุคคล (วัดความคมชัดอ้างอิงพิกัดกล้อง: {af_point_text})"
-
-    try:
-        iso_num = float(iso_val)
     except Exception:
-        iso_num = 100.0
+        return False
 
-    noise_penalty = 1.0 + max(0.0, (iso_num - 100.0) / 1600.0)
-    normalized_score = round(float(raw_sharpness / noise_penalty), 2)
+# โหลดข้อมูลเข้าสู่ Session State
+if 'camera_db' not in st.session_state:
+    st.session_state['camera_db'] = load_camera_db()
 
-    if normalized_score >= 1200:
-        quality = "🟢 คมชัดสูงมาก"
-        base_advice = "โฟกัสเข้าเป้าแม่นยำ ตำแหน่งคมชัดตรงจุด"
-    elif normalized_score >= 400:
-        quality = "🟡 คมชัดปานกลาง"
-        base_advice = "อยู่ในเกณฑ์ดี สามารถปรับจูน AF Fine-tune เพิ่มเติมได้"
-    else:
-        quality = "🔴 ซอฟต์ / เบลอ"
-        base_advice = "โฟกัสคลาดเคลื่อน หรือมีความสั่นไหวขณะบันทึกภาพ"
-
-    advice = f"{composition_summary} | {base_advice}"
-
-    annotated_img = img.copy()
-    box_color = (0, 255, 0) if normalized_score >= 400 else (0, 0, 255)
-    thickness = max(2, int(min(w, h) / 400))
-    
-    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), box_color, thickness)
-    if len(faces) == 0:
-        cv2.drawMarker(annotated_img, (raw_cx, raw_cy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=thickness)
-    cv2.drawMarker(annotated_img, (opt_cx, opt_cy), (0, 0, 255), markerType=cv2.MARKER_STAR, markerSize=26, thickness=thickness+1)
-
-    _, buffer = cv2.imencode('.jpg', annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-    annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
-
-    return normalized_score, quality, advice, annotated_b64, af_point_text
-
-@app.get("/", response_class=HTMLResponse)
-async def read_index():
-    if os.path.exists("index.html"):
-        return FileResponse("index.html")
-    return HTMLResponse("<h1>Pro Lens & Camera Analytics Dashboard API Running</h1>")
-
-@app.post("/analyze-file")
-async def analyze_file(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename)[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        temp_path = tmp.name
+# --- 2. ฟังก์ชันช่วยประมวลผลสกัดอภิข้อมูลเชิงลึก ---
+def extract_metadata_from_bytes(file_bytes, filename):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
+        temp_file.write(file_bytes)
+        temp_path = temp_file.name
 
     try:
-        exif_info = extract_exif_data(temp_path)
-        sharpness, quality, advice, annotated_b64, af_point = process_image_and_sharpness(
-            temp_path, exif_info["metadata"], exif_info["iso"]
-        )
+        with exiftool.ExifToolHelper() as et:
+            meta = et.get_metadata(temp_path)[0]
+
+        # สกัดข้อมูลเชิงลึก
+        camera = meta.get("EXIF:Model", "Unknown Camera")
+        lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens"))
+        iso = meta.get("EXIF:ISO", "N/A")
+        aperture = meta.get("EXIF:FNumber", "N/A")
+        shutter = meta.get("EXIF:ExposureTime", "N/A")
+        focal = meta.get("EXIF:FocalLength", "N/A")
+        focus_mode = meta.get("MakerNotes:FocusMode", "N/A")
+        af_area_mode = meta.get("MakerNotes:AFAreaMode", "N/A")
+        focus_distance = meta.get("MakerNotes:FocusDistance", "N/A")
 
         return {
-            "result": {
-                "filename": file.filename,
-                "camera": exif_info["camera"],
-                "lens": exif_info["lens"],
-                "af_point": af_point,
-                "af_fine_tune": exif_info["af_fine_tune"],
-                "f_number": exif_info["f_number"],
-                "exposure_time": exif_info["exposure_time"],
-                "iso": exif_info["iso"],
-                "focal_length": exif_info["focal_length"],
-                "sharpness": sharpness,
-                "quality": quality,
-                "advice": advice,
-                "annotated_image": annotated_b64
-            }
-        }
+            "File Name": filename,
+            "Camera": camera,
+            "Lens": lens,
+            "ISO": iso,
+            "Aperture": f"f/{aperture}" if aperture != "N/A" else "N/A",
+            "Shutter Speed": f"{shutter}s" if shutter != "N/A" else "N/A",
+            "Focal Length": f"{focal}mm" if focal != "N/A" else "N/A",
+            "Focus Mode": focus_mode,
+            "AF Area Mode": af_area_mode,
+            "Focus Distance (m)": focus_distance,
+            "meta_full": meta
+        }, temp_path
     except Exception as e:
-        logger.error(f"Processing Error: {e}")
-        return {"result": {"filename": file.filename, "error": str(e)}}
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        return {"File Name": filename, "Error": str(e)}, temp_path
+
+def analyze_raw_file(temp_path, meta_info):
+    try:
+        with rawpy.imread(temp_path) as raw:
+            # ดึงภาพ thumbnail (ถ้ามี) หรือ postprocess แบบ half_size
+            try:
+                thumb = raw.extract_thumb()
+                if thumb.format == rawpy.ThumbFormat.JPEG:
+                    thumb_img = Image.open(io.BytesIO(thumb.data))
+                else:
+                    thumb_img = Image.fromarray(thumb.data)
+            except rawpy.LibRawNoThumbnailError:
+                thumb_img = None
+
+            rgb_image = raw.postprocess(half_size=True)
+
+        gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
+
+        meta = meta_info.get("meta_full", {})
+        af_w = meta.get("MakerNotes:AFImageWidth", w*2)
+        af_h = meta.get("MakerNotes:AFImageHeight", h*2)
+        af_x = meta.get("MakerNotes:AFAreaXPosition", None)
+        af_y = meta.get("MakerNotes:AFAreaYPosition", None)
+
+        if af_x is not None and af_y is not None:
+            scale_x = w / float(af_w)
+            scale_y = h / float(af_h)
+            cx, cy = int(af_x * scale_x), int(af_y * scale_y)
+        else:
+            cx, cy = w // 2, h // 2
+
+        min_dim = min(h, w)
+        box_size = int(min_dim * 0.15)
+        if box_size % 2 != 0:
+            box_size += 1
+        half_box = box_size // 2
+
+        sx, ex = max(0, cx - half_box), min(w, cx + half_box)
+        sy, ey = max(0, cy - half_box), min(h, cy + half_box)
+
+        roi = gray[sy:ey, sx:ex]
+        roi_rgb = rgb_image[sy:ey, sx:ex]
+        score = np.var(cv2.Laplacian(roi, cv2.CV_64F))
+
+        return rgb_image, roi_rgb, score, cx, cy, sx, sy, ex, ey, thumb_img
+    except Exception as e:
+        return None, None, 0, 0, 0, 0, 0, 0, 0, None
+
+# --- 3. ส่วนหัวของเว็บไซต์ (Header UI) ---
+st.title("📸 RAW Focus & Sharpness Analytics Dashboard")
+st.write("ระบบสกัดและวิเคราะห์คุณภาพความคมชัดของภาพจากระบบจุดโฟกัสกล้อง DSLR (Canon/Nikon) บนเว็บแอปพลิเคชัน")
+
+# --- 4. เมนูแถบด้านข้างสำหรับควบคุมฐานข้อมูล (Sidebar Database Manager) ---
+with st.sidebar:
+    st.header("⚙️ ตั้งค่าฐานข้อมูลอุปกรณ์")
+    st.write("จัดการฐานข้อมูลแบรนด์กล้องและเลนส์ที่รองรับในระบบถาวร (JSON Database)")
+
+    new_brand = st.text_input("➕ เพิ่มยี่ห้อกล้อง/เลนส์ (เช่น Tamron, Sigma):")
+    if st.button("บันทึกยี่ห้อ") and new_brand:
+        if new_brand not in st.session_state['camera_db']["Brands"]:
+            st.session_state['camera_db']["Brands"].append(new_brand)
+            if save_camera_db(st.session_state['camera_db']):
+                st.success(f"เพิ่มยี่ห้อ '{new_brand}' และบันทึกลง JSON แล้ว!")
+            else:
+                st.error("ไม่สามารถบันทึกฐานข้อมูลลงไฟล์ได้")
+
+    new_model = st.text_input("➕ เพิ่มรุ่นกล้องถ่ายภาพ DSLR:")
+    if st.button("บันทึกรุ่นกล้อง") and new_model:
+        if new_model not in st.session_state['camera_db']["Models"]:
+            st.session_state['camera_db']["Models"].append(new_model)
+            if save_camera_db(st.session_state['camera_db']):
+                st.success(f"เพิ่มรุ่นกล้อง '{new_model}' ลงระบบถาวรแล้ว!")
+            else:
+                st.error("ไม่สามารถบันทึกฐานข้อมูลลงไฟล์ได้")
+
+    st.subheader("📂 ข้อมูลปัจจุบันในระบบ")
+    st.write("**แบรนด์ที่รองรับ:**", ", ".join(st.session_state['camera_db']["Brands"]))
+    st.write("**รุ่นกล้องที่ลงทะเบียน:**", ", ".join(st.session_state['camera_db']["Models"]))
+
+# --- 5. แท็บสำหรับการทำงานหลัก 2 เมนู (Dashboard Navigation Tabs) ---
+tab1, tab2 = st.tabs(["🔍 1. ทดสอบตรวจค่าภาพเดี่ยว", "📊 2. ประมวลผลเปรียบเทียบกลุ่มภาพ"])
+
+# --- เมนู 1: ทดสอบตรวจสอบภาพเดี่ยว ---
+with tab1:
+    st.header("🔍 วิเคราะห์ข้อมูลและจำลองกรอบพิกัด AF อ้างอิงรายไฟล์")
+    uploaded_file = st.file_uploader("กรุณาอัปโหลดภาพ RAW (.NEF)", type=["nef"], key="single_file")
+
+    if uploaded_file is not None:
+        file_bytes = uploaded_file.read()
+        with st.spinner("กำลังวิเคราะห์ไฟล์ภาพ RAW โปรดรอสักครู่..."):
+            meta_info, temp_path = extract_metadata_from_bytes(file_bytes, uploaded_file.name)
+
+            if "Error" in meta_info:
+                st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {meta_info['Error']}")
+            else:
+                rgb, roi, score, cx, cy, sx, sy, ex, ey, thumb_img = analyze_raw_file(temp_path, meta_info)
+
+                # แสดงผลแบ่งเป็น 3 คอลัมน์สำหรับรูปภาพ
+                col_t, col1, col2 = st.columns([1, 2, 2])
+
+                with col_t:
+                    st.subheader("🖼️ ภาพย่อ (Thumbnail)")
+                    if thumb_img:
+                        st.image(thumb_img, use_container_width=True)
+                    else:
+                        st.info("ไม่มี Thumbnail ฝังอยู่ในไฟล์นี้")
+
+                with col1:
+                    st.subheader("🖼️ รูปถ่ายต้นฉบับย่อส่วนพร้อมกรอบโฟกัส")
+                    fig1, ax1 = plt.subplots(figsize=(6, 4.5))
+                    ax1.imshow(rgb)
+                    rect = patches.Rectangle((sx, sy), ex-sx, ey-sy, linewidth=2, edgecolor='cyan', facecolor='none')
+                    ax1.add_patch(rect)
+                    ax1.scatter(cx, cy, color='red', marker='+', s=100, label='AF Center')
+                    ax1.legend()
+                    ax1.axis('off')
+                    st.pyplot(fig1)
+
+                with col2:
+                    st.subheader("🎯 พื้นที่ตรวจสอบความคมชัดเฉพาะจุด (ROI)")
+                    fig2, ax2 = plt.subplots(figsize=(6, 4.5))
+                    ax2.imshow(roi)
+                    ax2.set_title(f"Sharpness (Laplacian Var): {score:.2f}")
+                    ax2.axis('off')
+                    st.pyplot(fig2)
+
+                # แสดงรายละเอียดเชิงลึก
+                st.subheader("📋 สรุปรายละเอียดอภิข้อมูลอุปกรณ์ (Detailed EXIF Metadata)")
+
+                # แบ่งข้อมูลเป็น 2 ตารางเพื่อความสวยงาม
+                col_detail1, col_detail2 = st.columns(2)
+
+                with col_detail1:
+                    st.markdown("**ข้อมูลอุปกรณ์พื้นฐาน**")
+                    meta_basic = {
+                        "ชื่อไฟล์": meta_info.get("File Name", ""),
+                        "กล้องถ่ายภาพ": meta_info.get("Camera", ""),
+                        "เลนส์ที่ใช้": meta_info.get("Lens", ""),
+                    }
+                    st.table(pd.DataFrame(list(meta_basic.items()), columns=["คุณสมบัติ", "ค่าที่ได้"]))
+
+                with col_detail2:
+                    st.markdown("**การตั้งค่าการถ่ายภาพ (Settings & AF)**")
+                    meta_settings = {
+                        "ISO": meta_info.get("ISO", ""),
+                        "รูรับแสง": meta_info.get("Aperture", ""),
+                        "สปีดชัตเตอร์": meta_info.get("Shutter Speed", ""),
+                        "ความยาวโฟกัส": meta_info.get("Focal Length", ""),
+                        "โหมดโฟกัส": meta_info.get("Focus Mode", ""),
+                        "โหมดพื้นที่ AF": meta_info.get("AF Area Mode", ""),
+                        "ระยะโฟกัส (เมตร)": meta_info.get("Focus Distance (m)", "")
+                    }
+                    st.table(pd.DataFrame(list(meta_settings.items()), columns=["การตั้งค่า", "ค่าที่ได้"]))
+
+            # ทำลายไฟล์ชั่วคราว
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+# --- เมนู 2: เปรียบเทียบสถิติกลุ่มภาพ ---
+with tab2:
+    st.header("📊 วิเคราะห์และสรุปผลข้อมูลเชิงเปรียบเทียบในรูปภาพหลายไฟล์")
+    uploaded_files = st.file_uploader("กรุณาอัปโหลดกลุ่มภาพ RAW (.NEF) เพื่อทำการเปรียบเทียบ", type=["nef"], accept_multiple_files=True, key="multi_file")
+
+    if uploaded_files:
+        records = []
+        for f_upload in uploaded_files:
+            file_bytes = f_upload.read()
+            meta_info, temp_path = extract_metadata_from_bytes(file_bytes, f_upload.name)
+
+            if "Error" not in meta_info:
+                _, _, score, _, _, _, _, _, _, _ = analyze_raw_file(temp_path, meta_info)
+                meta_info["Sharpness Score"] = round(score, 2)
+                records.append(meta_info)
+
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+        if records:
+            df = pd.DataFrame(records)
+
+            st.subheader("📈 ตารางสรุปการประเมินวิเคราะห์ผลเชิงสถิติ (พร้อมข้อมูลการตั้งค่ากล้องเชิงลึก)")
+            display_cols = ["File Name", "Camera", "Lens", "ISO", "Aperture", "Shutter Speed", "Focal Length", "Focus Mode", "Focus Distance (m)", "Sharpness Score"]
+            st.dataframe(df[display_cols], use_container_width=True)
+
+            st.subheader("📊 แผนภูมิแท่งเปรียบเทียบคะแนนความคมชัด (Sharpness Variance)")
+            fig_bar, ax_bar = plt.subplots(figsize=(10, 4.5))
+            ax_bar.bar(df["File Name"], df["Sharpness Score"], color='#3498DB', alpha=0.85, width=0.4)
+            ax_bar.set_title("Sharpness Quality Assessment (Higher is Sharper)", fontsize=12, fontweight='bold')
+            ax_bar.set_ylabel("Sharpness Score (Laplacian Var)")
+            ax_bar.grid(axis='y', linestyle='--', alpha=0.5)
+            st.pyplot(fig_bar)
+        else:
+            st.warning("⚠️ ไม่สามารถวิเคราะห์สกัดคุณสมบัติไฟล์ที่อัปโหลดได้")
