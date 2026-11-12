@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import json
 import cv2
 import rawpy
 import numpy as np
@@ -9,271 +8,180 @@ import exiftool
 import tempfile
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import seaborn as sns
 from PIL import Image
 import io
 
 # --- ตั้งค่าหน้าเว็บ Streamlit ---
-st.set_page_config(
-    page_title="RAW Image Analytics Dashboard",
-    page_icon="📸",
-    layout="wide"
-)
+st.set_page_config(page_title="RAW Image Analytics Dashboard", page_icon="📸", layout="wide")
 
-# --- 1. จัดการระบบฐานข้อมูลกล้องและเลนส์จากไฟล์ JSON (Persistent Storage) ---
-DB_FILE = 'camera_db.json'
-
-def load_camera_db():
-    default_db = {
-        "Brands": ["Nikon", "Canon", "Sigma", "Tamron", "Samyang", "Tokina"],
-        "Models": ["NIKON D810", "NIKON D850", "NIKON D750", "Canon EOS 5D Mark IV", "Canon EOS 6D Mark II"]
-    }
-    if os.path.exists(DB_FILE):
+# --- ฟังก์ชันช่วยประมวลผล ---
+@st.cache_data(show_spinner=False)
+def process_uploaded_files(uploaded_files):
+    records = []
+    for f_upload in uploaded_files:
+        file_bytes = f_upload.getvalue()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".NEF") as temp_file:
+            temp_file.write(file_bytes)
+            temp_path = temp_file.name
         try:
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return default_db
-    return default_db
+            with exiftool.ExifToolHelper() as et:
+                meta = et.get_metadata(temp_path)[0]
+            
+            camera = meta.get("EXIF:Model", "Unknown Camera")
+            focus_dist = float(meta.get("MakerNotes:FocusDistance", 0)) if meta.get("MakerNotes:FocusDistance") else np.nan
+            roll = float(meta.get("MakerNotes:RollAngle", np.nan))
+            pitch = float(meta.get("MakerNotes:PitchAngle", np.nan))
 
-def save_camera_db(db_data):
-    try:
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(db_data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception:
-        return False
+            with rawpy.imread(temp_path) as raw:
+                try:
+                    thumb = raw.extract_thumb()
+                    thumb_img = Image.open(io.BytesIO(thumb.data)) if thumb.format == rawpy.ThumbFormat.JPEG else Image.fromarray(thumb.data)
+                except:
+                    thumb_img = None
+                rgb_image = raw.postprocess(half_size=True)
+            
+            gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
+            h, w = gray.shape
+            
+            af_w = meta.get("MakerNotes:AFImageWidth", w*2)
+            af_h = meta.get("MakerNotes:AFImageHeight", h*2)
+            af_x = meta.get("MakerNotes:AFAreaXPosition", None)
+            af_y = meta.get("MakerNotes:AFAreaYPosition", None)
+            
+            cx, cy = int(af_x * (w/af_w)), int(af_y * (h/af_h)) if af_x and af_y else (w//2, h//2)
+            box_size = int(min(h, w) * 0.15)
+            box_size += 1 if box_size % 2 != 0 else 0
+            half_box = box_size // 2
+            
+            sx, ex = max(0, cx - half_box), min(w, cx + half_box)
+            sy, ey = max(0, cy - half_box), min(h, cy + half_box)
+            
+            roi = gray[sy:ey, sx:ex]
+            roi_rgb = rgb_image[sy:ey, sx:ex]
+            
+            # Analysis values
+            score = np.var(cv2.Laplacian(roi, cv2.CV_64F))
+            high_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            canny = cv2.Canny(roi, 0.5 * high_thresh, high_thresh)
+            edge_density = (np.sum(canny > 0) / canny.size) * 100
+            hist = cv2.calcHist([roi_rgb], [0], None, [256], [0, 256]) # R channel for demo
+            contrast = np.std(roi)
 
-# โหลดข้อมูลเข้าสู่ Session State
-if 'camera_db' not in st.session_state:
-    st.session_state['camera_db'] = load_camera_db()
+            records.append({
+                "File Name": f_upload.name,
+                "Camera": camera,
+                "Focus Distance (m)": focus_dist,
+                "Roll Angle": roll,
+                "Pitch Angle": pitch,
+                "Sharpness Score": round(score, 2),
+                "Edge Density (%)": round(edge_density, 2),
+                "Contrast (Std Dev)": round(contrast, 2),
+                "Image Data": {"rgb": rgb_image, "roi_rgb": roi_rgb, "canny": canny, "box": (sx, sy, ex, ey), "center": (cx, cy), "thumb": thumb_img}
+            })
+        except Exception as e:
+            st.error(f"Error processing {f_upload.name}: {e}")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    return records
 
-# --- 2. ฟังก์ชันช่วยประมวลผลสกัดอภิข้อมูลเชิงลึก ---
-def extract_metadata_from_bytes(file_bytes, filename):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
-        temp_file.write(file_bytes)
-        temp_path = temp_file.name
+# --- UI ส่วนหัวและแถบด้านข้าง ---
+st.title("📸 RAW Advanced Analytics Dashboard")
 
-    try:
-        with exiftool.ExifToolHelper() as et:
-            meta = et.get_metadata(temp_path)[0]
-
-        # สกัดข้อมูลเชิงลึก
-        camera = meta.get("EXIF:Model", "Unknown Camera")
-        lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens"))
-        iso = meta.get("EXIF:ISO", "N/A")
-        aperture = meta.get("EXIF:FNumber", "N/A")
-        shutter = meta.get("EXIF:ExposureTime", "N/A")
-        focal = meta.get("EXIF:FocalLength", "N/A")
-        focus_mode = meta.get("MakerNotes:FocusMode", "N/A")
-        af_area_mode = meta.get("MakerNotes:AFAreaMode", "N/A")
-        focus_distance = meta.get("MakerNotes:FocusDistance", "N/A")
-
-        return {
-            "File Name": filename,
-            "Camera": camera,
-            "Lens": lens,
-            "ISO": iso,
-            "Aperture": f"f/{aperture}" if aperture != "N/A" else "N/A",
-            "Shutter Speed": f"{shutter}s" if shutter != "N/A" else "N/A",
-            "Focal Length": f"{focal}mm" if focal != "N/A" else "N/A",
-            "Focus Mode": focus_mode,
-            "AF Area Mode": af_area_mode,
-            "Focus Distance (m)": focus_distance,
-            "meta_full": meta
-        }, temp_path
-    except Exception as e:
-        return {"File Name": filename, "Error": str(e)}, temp_path
-
-def analyze_raw_file(temp_path, meta_info):
-    try:
-        with rawpy.imread(temp_path) as raw:
-            # ดึงภาพ thumbnail (ถ้ามี) หรือ postprocess แบบ half_size
-            try:
-                thumb = raw.extract_thumb()
-                if thumb.format == rawpy.ThumbFormat.JPEG:
-                    thumb_img = Image.open(io.BytesIO(thumb.data))
-                else:
-                    thumb_img = Image.fromarray(thumb.data)
-            except rawpy.LibRawNoThumbnailError:
-                thumb_img = None
-
-            rgb_image = raw.postprocess(half_size=True)
-
-        gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
-        h, w = gray.shape
-
-        meta = meta_info.get("meta_full", {})
-        af_w = meta.get("MakerNotes:AFImageWidth", w*2)
-        af_h = meta.get("MakerNotes:AFImageHeight", h*2)
-        af_x = meta.get("MakerNotes:AFAreaXPosition", None)
-        af_y = meta.get("MakerNotes:AFAreaYPosition", None)
-
-        if af_x is not None and af_y is not None:
-            scale_x = w / float(af_w)
-            scale_y = h / float(af_h)
-            cx, cy = int(af_x * scale_x), int(af_y * scale_y)
-        else:
-            cx, cy = w // 2, h // 2
-
-        min_dim = min(h, w)
-        box_size = int(min_dim * 0.15)
-        if box_size % 2 != 0:
-            box_size += 1
-        half_box = box_size // 2
-
-        sx, ex = max(0, cx - half_box), min(w, cx + half_box)
-        sy, ey = max(0, cy - half_box), min(h, cy + half_box)
-
-        roi = gray[sy:ey, sx:ex]
-        roi_rgb = rgb_image[sy:ey, sx:ex]
-        score = np.var(cv2.Laplacian(roi, cv2.CV_64F))
-
-        return rgb_image, roi_rgb, score, cx, cy, sx, sy, ex, ey, thumb_img
-    except Exception as e:
-        return None, None, 0, 0, 0, 0, 0, 0, 0, None
-
-# --- 3. ส่วนหัวของเว็บไซต์ (Header UI) ---
-st.title("📸 RAW Focus & Sharpness Analytics Dashboard")
-st.write("ระบบสกัดและวิเคราะห์คุณภาพความคมชัดของภาพจากระบบจุดโฟกัสกล้อง DSLR (Canon/Nikon) บนเว็บแอปพลิเคชัน")
-
-# --- 4. เมนูแถบด้านข้างสำหรับควบคุมฐานข้อมูล (Sidebar Database Manager) ---
 with st.sidebar:
-    st.header("⚙️ ตั้งค่าฐานข้อมูลอุปกรณ์")
-    st.write("จัดการฐานข้อมูลแบรนด์กล้องและเลนส์ที่รองรับในระบบถาวร (JSON Database)")
+    st.header("📂 อัปโหลดไฟล์ RAW")
+    uploaded_files = st.file_uploader("อัปโหลดไฟล์ภาพ .NEF หลายไฟล์", type=["nef"], accept_multiple_files=True)
 
-    new_brand = st.text_input("➕ เพิ่มยี่ห้อกล้อง/เลนส์ (เช่น Tamron, Sigma):")
-    if st.button("บันทึกยี่ห้อ") and new_brand:
-        if new_brand not in st.session_state['camera_db']["Brands"]:
-            st.session_state['camera_db']["Brands"].append(new_brand)
-            if save_camera_db(st.session_state['camera_db']):
-                st.success(f"เพิ่มยี่ห้อ '{new_brand}' และบันทึกลง JSON แล้ว!")
-            else:
-                st.error("ไม่สามารถบันทึกฐานข้อมูลลงไฟล์ได้")
-
-    new_model = st.text_input("➕ เพิ่มรุ่นกล้องถ่ายภาพ DSLR:")
-    if st.button("บันทึกรุ่นกล้อง") and new_model:
-        if new_model not in st.session_state['camera_db']["Models"]:
-            st.session_state['camera_db']["Models"].append(new_model)
-            if save_camera_db(st.session_state['camera_db']):
-                st.success(f"เพิ่มรุ่นกล้อง '{new_model}' ลงระบบถาวรแล้ว!")
-            else:
-                st.error("ไม่สามารถบันทึกฐานข้อมูลลงไฟล์ได้")
-
-    st.subheader("📂 ข้อมูลปัจจุบันในระบบ")
-    st.write("**แบรนด์ที่รองรับ:**", ", ".join(st.session_state['camera_db']["Brands"]))
-    st.write("**รุ่นกล้องที่ลงทะเบียน:**", ", ".join(st.session_state['camera_db']["Models"]))
-
-# --- 5. แท็บสำหรับการทำงานหลัก 2 เมนู (Dashboard Navigation Tabs) ---
-tab1, tab2 = st.tabs(["🔍 1. ทดสอบตรวจค่าภาพเดี่ยว", "📊 2. ประมวลผลเปรียบเทียบกลุ่มภาพ"])
-
-# --- เมนู 1: ทดสอบตรวจสอบภาพเดี่ยว ---
-with tab1:
-    st.header("🔍 วิเคราะห์ข้อมูลและจำลองกรอบพิกัด AF อ้างอิงรายไฟล์")
-    uploaded_file = st.file_uploader("กรุณาอัปโหลดภาพ RAW (.NEF)", type=["nef"], key="single_file")
-
-    if uploaded_file is not None:
-        file_bytes = uploaded_file.read()
-        with st.spinner("กำลังวิเคราะห์ไฟล์ภาพ RAW โปรดรอสักครู่..."):
-            meta_info, temp_path = extract_metadata_from_bytes(file_bytes, uploaded_file.name)
-
-            if "Error" in meta_info:
-                st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {meta_info['Error']}")
-            else:
-                rgb, roi, score, cx, cy, sx, sy, ex, ey, thumb_img = analyze_raw_file(temp_path, meta_info)
-
-                # แสดงผลแบ่งเป็น 3 คอลัมน์สำหรับรูปภาพ
-                col_t, col1, col2 = st.columns([1, 2, 2])
-
-                with col_t:
-                    st.subheader("🖼️ ภาพย่อ (Thumbnail)")
-                    if thumb_img:
-                        st.image(thumb_img, use_container_width=True)
-                    else:
-                        st.info("ไม่มี Thumbnail ฝังอยู่ในไฟล์นี้")
-
+if uploaded_files:
+    with st.spinner("กำลังประมวลผลการวิเคราะห์ทั้งหมด..."):
+        data_records = process_uploaded_files(uploaded_files)
+    
+    if data_records:
+        df = pd.DataFrame([{k: v for k, v in r.items() if k != "Image Data"} for r in data_records])
+        
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "🔍 1. วิเคราะห์ภาพเดี่ยว", 
+            "📊 2. เปรียบเทียบ Sharpness", 
+            "📐 3. Edge Detection", 
+            "🎨 4. Color Histogram", 
+            "📈 5. Correlations & Angles"
+        ])
+        
+        # Tab 1: Single Image
+        with tab1:
+            selected_file = st.selectbox("เลือกภาพที่ต้องการดูรายละเอียด:", df["File Name"].tolist())
+            img_data = next((r["Image Data"] for r in data_records if r["File Name"] == selected_file), None)
+            if img_data:
+                col1, col2 = st.columns([1, 1])
                 with col1:
-                    st.subheader("🖼️ รูปถ่ายต้นฉบับย่อส่วนพร้อมกรอบโฟกัส")
-                    fig1, ax1 = plt.subplots(figsize=(6, 4.5))
-                    ax1.imshow(rgb)
-                    rect = patches.Rectangle((sx, sy), ex-sx, ey-sy, linewidth=2, edgecolor='cyan', facecolor='none')
-                    ax1.add_patch(rect)
-                    ax1.scatter(cx, cy, color='red', marker='+', s=100, label='AF Center')
-                    ax1.legend()
-                    ax1.axis('off')
-                    st.pyplot(fig1)
-
+                    fig, ax = plt.subplots()
+                    ax.imshow(img_data["rgb"])
+                    sx, sy, ex, ey = img_data["box"]
+                    ax.add_patch(patches.Rectangle((sx, sy), ex-sx, ey-sy, linewidth=2, edgecolor='cyan', facecolor='none'))
+                    ax.scatter(*img_data["center"], color='red', marker='+', s=100)
+                    ax.axis('off')
+                    st.pyplot(fig)
                 with col2:
-                    st.subheader("🎯 พื้นที่ตรวจสอบความคมชัดเฉพาะจุด (ROI)")
-                    fig2, ax2 = plt.subplots(figsize=(6, 4.5))
-                    ax2.imshow(roi)
-                    ax2.set_title(f"Sharpness (Laplacian Var): {score:.2f}")
+                    fig2, ax2 = plt.subplots()
+                    ax2.imshow(img_data["roi_rgb"])
+                    ax2.set_title("Crop Focus ROI")
                     ax2.axis('off')
                     st.pyplot(fig2)
-
-                # แสดงรายละเอียดเชิงลึก
-                st.subheader("📋 สรุปรายละเอียดอภิข้อมูลอุปกรณ์ (Detailed EXIF Metadata)")
-
-                # แบ่งข้อมูลเป็น 2 ตารางเพื่อความสวยงาม
-                col_detail1, col_detail2 = st.columns(2)
-
-                with col_detail1:
-                    st.markdown("**ข้อมูลอุปกรณ์พื้นฐาน**")
-                    meta_basic = {
-                        "ชื่อไฟล์": meta_info.get("File Name", ""),
-                        "กล้องถ่ายภาพ": meta_info.get("Camera", ""),
-                        "เลนส์ที่ใช้": meta_info.get("Lens", ""),
-                    }
-                    st.table(pd.DataFrame(list(meta_basic.items()), columns=["คุณสมบัติ", "ค่าที่ได้"]))
-
-                with col_detail2:
-                    st.markdown("**การตั้งค่าการถ่ายภาพ (Settings & AF)**")
-                    meta_settings = {
-                        "ISO": meta_info.get("ISO", ""),
-                        "รูรับแสง": meta_info.get("Aperture", ""),
-                        "สปีดชัตเตอร์": meta_info.get("Shutter Speed", ""),
-                        "ความยาวโฟกัส": meta_info.get("Focal Length", ""),
-                        "โหมดโฟกัส": meta_info.get("Focus Mode", ""),
-                        "โหมดพื้นที่ AF": meta_info.get("AF Area Mode", ""),
-                        "ระยะโฟกัส (เมตร)": meta_info.get("Focus Distance (m)", "")
-                    }
-                    st.table(pd.DataFrame(list(meta_settings.items()), columns=["การตั้งค่า", "ค่าที่ได้"]))
-
-            # ทำลายไฟล์ชั่วคราว
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-# --- เมนู 2: เปรียบเทียบสถิติกลุ่มภาพ ---
-with tab2:
-    st.header("📊 วิเคราะห์และสรุปผลข้อมูลเชิงเปรียบเทียบในรูปภาพหลายไฟล์")
-    uploaded_files = st.file_uploader("กรุณาอัปโหลดกลุ่มภาพ RAW (.NEF) เพื่อทำการเปรียบเทียบ", type=["nef"], accept_multiple_files=True, key="multi_file")
-
-    if uploaded_files:
-        records = []
-        for f_upload in uploaded_files:
-            file_bytes = f_upload.read()
-            meta_info, temp_path = extract_metadata_from_bytes(file_bytes, f_upload.name)
-
-            if "Error" not in meta_info:
-                _, _, score, _, _, _, _, _, _, _ = analyze_raw_file(temp_path, meta_info)
-                meta_info["Sharpness Score"] = round(score, 2)
-                records.append(meta_info)
-
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-        if records:
-            df = pd.DataFrame(records)
-
-            st.subheader("📈 ตารางสรุปการประเมินวิเคราะห์ผลเชิงสถิติ (พร้อมข้อมูลการตั้งค่ากล้องเชิงลึก)")
-            display_cols = ["File Name", "Camera", "Lens", "ISO", "Aperture", "Shutter Speed", "Focal Length", "Focus Mode", "Focus Distance (m)", "Sharpness Score"]
-            st.dataframe(df[display_cols], use_container_width=True)
-
-            st.subheader("📊 แผนภูมิแท่งเปรียบเทียบคะแนนความคมชัด (Sharpness Variance)")
-            fig_bar, ax_bar = plt.subplots(figsize=(10, 4.5))
-            ax_bar.bar(df["File Name"], df["Sharpness Score"], color='#3498DB', alpha=0.85, width=0.4)
-            ax_bar.set_title("Sharpness Quality Assessment (Higher is Sharper)", fontsize=12, fontweight='bold')
-            ax_bar.set_ylabel("Sharpness Score (Laplacian Var)")
-            ax_bar.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        # Tab 2: Sharpness Comparison
+        with tab2:
+            st.subheader("ตารางสรุปผลข้อมูล")
+            st.dataframe(df)
+            fig_bar, ax_bar = plt.subplots(figsize=(10, 4))
+            sns.barplot(data=df, x='File Name', y='Sharpness Score', ax=ax_bar, palette='viridis')
+            ax_bar.set_title("Sharpness Score Comparison")
             st.pyplot(fig_bar)
-        else:
-            st.warning("⚠️ ไม่สามารถวิเคราะห์สกัดคุณสมบัติไฟล์ที่อัปโหลดได้")
+            
+        # Tab 3: Edge Detection
+        with tab3:
+            st.subheader("การตรวจจับขอบภาพ (Canny Edge)")
+            for r in data_records:
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig, ax = plt.subplots()
+                    ax.imshow(r["Image Data"]["roi_rgb"])
+                    ax.set_title(f"{r['File Name']} - ROI")
+                    ax.axis('off')
+                    st.pyplot(fig)
+                with col2:
+                    fig2, ax2 = plt.subplots()
+                    ax2.imshow(r["Image Data"]["canny"], cmap='gray')
+                    ax2.set_title(f"Edge Density: {r['Edge Density (%)']:.2f}%")
+                    ax2.axis('off')
+                    st.pyplot(fig2)
+        
+        # Tab 4: Histogram
+        with tab4:
+            st.subheader("Color Histogram ของพื้นที่จุดโฟกัส")
+            for r in data_records:
+                fig, ax = plt.subplots(figsize=(8, 3))
+                roi_rgb = r["Image Data"]["roi_rgb"]
+                colors = ('r', 'g', 'b')
+                for j, col in enumerate(colors):
+                    hist = cv2.calcHist([roi_rgb], [j], None, [256], [0, 256])
+                    ax.plot(hist, color=col, alpha=0.8)
+                ax.set_title(f"{r['File Name']} - Contrast: {r['Contrast (Std Dev)']:.2f}")
+                st.pyplot(fig)
+
+        # Tab 5: Correlations
+        with tab5:
+            st.subheader("ความสัมพันธ์เชิงลึก (Correlations)")
+            col1, col2 = st.columns(2)
+            with col1:
+                fig, ax = plt.subplots()
+                sns.regplot(data=df, x='Edge Density (%)', y='Sharpness Score', ax=ax, scatter_kws={'s':100})
+                ax.set_title("Sharpness vs Edge Density")
+                st.pyplot(fig)
+            with col2:
+                fig2, ax2 = plt.subplots()
+                sns.regplot(data=df, x='Roll Angle', y='Sharpness Score', ax=ax2, scatter_kws={'s':100, 'color':'red'})
+                ax2.set_title("Sharpness vs Roll Angle")
+                st.pyplot(fig2)
+else:
+    st.info("👈 กรุณาอัปโหลดไฟล์ RAW ทางแถบด้านซ้ายเพื่อเริ่มต้นการวิเคราะห์ครับ")
