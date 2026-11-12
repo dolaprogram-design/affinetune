@@ -1,6 +1,7 @@
-fastapi
-uvicorn
-python-multipart
+streamlit
+rawpy
 opencv-python-headless
+pyexiftool
+matplotlib
+pandas
 numpy
-PyExifTool
