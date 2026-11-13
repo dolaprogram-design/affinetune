@@ -1,17 +1,4 @@
 {
-  "Brands": [
-    "Nikon",
-    "Canon",
-    "Sigma",
-    "Tamron",
-    "Samyang",
-    "Tokina"
-  ],
-  "Models": [
-    "NIKON D810",
-    "NIKON D850",
-    "NIKON D750",
-    "Canon EOS 5D Mark IV",
-    "Canon EOS 6D Mark II"
-  ]
+  "Brands": ["Nikon", "Canon", "Sigma", "Tamron", "Samyang", "Tokina"],
+  "Models": ["NIKON D810", "NIKON D850", "NIKON D750", "Canon EOS 5D Mark IV", "Canon EOS 6D Mark II"]
 }
