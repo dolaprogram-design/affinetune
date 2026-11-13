@@ -4,10 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import seaborn as sns
 
-# --- ตั้งค่าหน้าเว็บ Streamlit ---
 st.set_page_config(page_title="RAW Image Advanced Analytics", page_icon="📸", layout="wide")
 
-# ค้นหาตำแหน่งของ Exiftool
 EXIFTOOL_PATH = None
 possible_paths = [
     "./exiftool_bin/exiftool",
@@ -26,14 +24,13 @@ for path in possible_paths:
     except Exception:
         continue
 
-# Initialize Session State สำหรับเก็บประวัติ (ไม่หายแม้อัปโหลดไฟล์ใหม่)
 if 'history_records' not in st.session_state:
     st.session_state['history_records'] = []
 
 def process_single_file(f_upload):
-    file_bytes = f_upload.getvalue()
+    # เขียนไฟล์ลง Temp ทันทีและล้างค่าในหน่วยความจำ
     with tempfile.NamedTemporaryFile(delete=False, suffix=".NEF") as temp_file:
-        temp_file.write(file_bytes)
+        temp_file.write(f_upload.getvalue())
         temp_path = temp_file.name
 
     try:
@@ -54,12 +51,26 @@ def process_single_file(f_upload):
         if af_tune == "N/A" and "MakerNotes:AFFineTune" in meta:
             af_tune = meta.get("MakerNotes:AFFineTune")
             
-        focus_dist = float(meta.get("MakerNotes:FocusDistance", 0)) if meta.get("MakerNotes:FocusDistance") else np.nan
         af_mode = meta.get("MakerNotes:FocusMode", "N/A")
-        roll = float(meta.get("MakerNotes:RollAngle", np.nan))
 
-        with rawpy.imread(temp_path) as raw:
-            rgb_image = raw.postprocess(half_size=True, use_camera_wb=True)
+        # ดึง Embedded JPEG
+        rgb_image = None
+        preview_process = subprocess.run([et_executable, "-b", "-JpgFromRaw", temp_path], capture_output=True)
+        preview_data = preview_process.stdout
+        
+        if not preview_data:
+            preview_process = subprocess.run([et_executable, "-b", "-PreviewImage", temp_path], capture_output=True)
+            preview_data = preview_process.stdout
+            
+        if preview_data:
+            image_np = np.frombuffer(preview_data, np.uint8)
+            rgb_image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+            if rgb_image is not None:
+                rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
+        
+        if rgb_image is None:
+            with rawpy.imread(temp_path) as raw:
+                rgb_image = raw.postprocess(half_size=True, use_camera_wb=True)
 
         gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
         h, w = gray.shape
@@ -138,7 +149,6 @@ def process_single_file(f_upload):
             }
         }
 
-        # ลบข้อมูลเก่าที่ชื่อซ้ำออกก่อนอัปเดตใหม่
         st.session_state['history_records'] = [r for r in st.session_state['history_records'] if r['File Name'] != f_upload.name]
         st.session_state['history_records'].append(record)
 
@@ -155,33 +165,39 @@ def process_single_file(f_upload):
         gc.collect()
 
 # --- UI Components ---
-st.title("📸 RAW Analytics: Multi-File & AF Accuracy Analysis")
+st.title("📸 RAW Analytics: Multi-File & AF Accuracy Analysis (Render Fixed)")
+
+st.error("🚨 **หากคุณพบ Error 502 / แดชบอร์ดดับ** 
+สาเหตุเกิดจาก **RAM ของเซิร์ฟเวอร์คลาวด์เต็ม** ในจังหวะที่รับไฟล์ขนาดใหญ่หลายไฟล์พร้อมกัน เพื่อป้องกันการล่ม **กรุณาอัปโหลดไฟล์ครั้งละ 1-2 ไฟล์เท่านั้น** ข้อมูลจะถูกบันทึกสะสมไว้ในตารางด้านล่างอัตโนมัติ")
+
 if not EXIFTOOL_PATH:
     st.warning("⚠️ ไม่พบ Exiftool ในระบบ การอ่านค่าบางอย่างอาจไม่สมบูรณ์")
 
 with st.sidebar:
     st.header("📂 คิวอัปโหลดไฟล์ RAW")
-    st.error("🚨 สำคัญ: ระบบคลาวด์มีข้อจำกัดด้านหน่วยความจำ (RAM) และเวลาการอัปโหลด (Timeout)\n\n**แนะนำให้อัปโหลดทีละ 2-3 ไฟล์** \nเมื่อประมวลผลเสร็จแล้ว คุณสามารถลากไฟล์ชุดต่อไปมาวางทับได้เลย ระบบจะนำข้อมูลไปต่อท้ายตารางวิเคราะห์ให้โดยอัตโนมัติ (ข้อมูลเก่าไม่หาย)")
+    st.info("💡 ข้อจำกัดระบบ: กรุณาอัปโหลดทีละ 1-2 ไฟล์ เพื่อป้องกันเซิร์ฟเวอร์น็อค (Error 502)")
     
-    uploaded_files = st.file_uploader("เลือกไฟล์ภาพ .NEF (แนะนำทีละ 2-3 ไฟล์)", type=["nef"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("เลือกไฟล์ภาพ .NEF (อัปโหลดครั้งละ 1-2 ไฟล์)", type=["nef"], accept_multiple_files=True)
 
     if uploaded_files:
-        st.write(f"เตรียมประมวลผล: {len(uploaded_files)} ไฟล์")
-        if st.button("⚡ เริ่มทำการประมวลผลทั้งหมด", type="primary"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for i, f in enumerate(uploaded_files):
-                status_text.text(f"กำลังประมวลผล ({i+1}/{len(uploaded_files)}): {f.name} ...")
+        if len(uploaded_files) > 2:
+            st.error("❌ จำนวนไฟล์มากเกินไป เซิร์ฟเวอร์อาจล่มได้ กรุณาลบออกให้เหลือ 1-2 ไฟล์ต่อรอบ")
+        else:
+            st.write(f"เตรียมประมวลผล: {len(uploaded_files)} ไฟล์")
+            if st.button("⚡ เริ่มทำการประมวลผลทั้งหมด", type="primary"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                # เช็คว่าเคยประมวลผลไฟล์นี้ไปแล้วหรือยัง (เช็คจากชื่อ)
-                if not any(r['File Name'] == f.name for r in st.session_state['history_records']):
-                    process_single_file(f)
+                for i, f in enumerate(uploaded_files):
+                    status_text.text(f"กำลังประมวลผล ({i+1}/{len(uploaded_files)}): {f.name} ...")
+                    
+                    if not any(r['File Name'] == f.name for r in st.session_state['history_records']):
+                        process_single_file(f)
+                    
+                    progress_bar.progress((i + 1) / len(uploaded_files))
                 
-                progress_bar.progress((i + 1) / len(uploaded_files))
-            
-            status_text.text("✅ ประมวลผลเสร็จสมบูรณ์!")
-            st.success("สามารถดูลากไฟล์ชุดต่อไปมาอัปโหลดเพิ่มได้เลย!")
+                status_text.text("✅ ประมวลผลเสร็จสมบูรณ์!")
+                st.success("สำเร็จ! คุณสามารถลากไฟล์อีก 1-2 ไฟล์มาอัปโหลดเพิ่มต่อได้เลย")
 
     st.divider()
     if st.button("🗑️ ล้างข้อมูลประวัติทั้งหมด"):
@@ -291,6 +307,3 @@ if len(st.session_state['history_records']) > 0:
         
         meta_df = pd.DataFrame(list(curr_meta_data["Full Metadata"].items()), columns=["Metadata Tag", "Value"])
         st.dataframe(meta_df, use_container_width=True, height=500)
-        
-else:
-    st.info("👈 กรุณาเลือกไฟล์และกด 'เริ่มทำการประมวลผล' ที่แถบด้านซ้าย เพื่อดูข้อมูลเปรียบเทียบ")
