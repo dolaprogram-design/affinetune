@@ -1,4 +1,4 @@
-mport streamlit as st
+import streamlit as st
 import os
 import cv2
 import rawpy
@@ -91,7 +91,7 @@ def process_uploaded_files(uploaded_files):
             roi = gray[sy:ey, sx:ex]
             roi_rgb = rgb_image[sy:ey, sx:ex].copy()
 
-            # Calculate Sharpness, Edge Density, Contrast -> Convert to Integers
+            # Calculate Sharpness (Laplacian Var), Edge Density (Canny), Contrast (Std) -> Convert all to integers
             score_raw = np.var(cv2.Laplacian(roi, cv2.CV_64F)) if roi.size > 0 else 0.0
             score = int(round(score_raw))
 
@@ -107,7 +107,7 @@ def process_uploaded_files(uploaded_files):
             contrast_raw = np.std(roi) if roi.size > 0 else 0.0
             contrast = int(round(contrast_raw))
 
-            # Downsample preview images
+            # Downsample preview images to save server-client rendering memory
             preview_w = int(w * 0.25)
             preview_h = int(h * 0.25)
             rgb_resized = cv2.resize(rgb_image, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
@@ -130,6 +130,7 @@ def process_uploaded_files(uploaded_files):
                 }
             })
 
+            # Clean up immediately after appending variables
             del rgb_image, gray, roi, rgb_resized, roi_rgb, canny
             gc.collect()
 
@@ -203,7 +204,9 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
                 plt.close(fig2)
 
     with tab3:
-        st.subheader("📊 สถิติเปรียบเทียบ Sharpness และความสัมพันธ์ของกลุ่ม ISO")
+        st.subheader("📊 สถิติเปรียบเทียบ Sharpness และความสัมพันธ์ของกลุ่ม ISO (จากต้นฉบับสมุดโน้ตบุ๊ก)")
+
+        # ส่วนที่ 1: กราฟแท่งสรุปภาพรายรูป
         col_left, col_right = st.columns(2)
 
         with col_left:
@@ -216,6 +219,7 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
             st.pyplot(fig_bar)
             plt.close(fig_bar)
 
+        # ส่วนที่ 2: ดึงตรรกะจัดกลุ่มวิเคราะห์ ISO ตามสมุดโน้ตบุ๊กเดิม
         with col_right:
             st.markdown("**📈 ค่าเฉลี่ย Sharpness จำแนกตามกลุ่ม ISO (Average ISO Group)**")
             df_valid_iso = df[df['ISO'] != 'No EXIF'].copy()
@@ -223,10 +227,12 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
                 df_valid_iso['ISO'] = pd.to_numeric(df_valid_iso['ISO'], errors='coerce')
                 df_valid_iso = df_valid_iso.dropna(subset=['ISO'])
 
+                # จัดกลุ่มหาค่าเฉลี่ย
                 df_iso_group = df_valid_iso.groupby('ISO')['Sharpness Score'].agg(['mean', 'count']).reset_index()
                 df_iso_group.columns = ['ISO', 'Average Sharpness', 'Image Count']
                 df_iso_group['Average Sharpness'] = df_iso_group['Average Sharpness'].round().astype(int)
 
+                # พล็อตกราฟแท่งจัดกลุ่ม ISO
                 fig_iso, ax_iso = plt.subplots(figsize=(8, 5))
                 x_labels = [f"ISO {int(x)}" for x in df_iso_group['ISO']]
                 bars = ax_iso.bar(x_labels, df_iso_group['Average Sharpness'], color='teal', edgecolor='darkslategrey', alpha=0.85)
@@ -238,10 +244,12 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
 
                 st.pyplot(fig_iso)
                 plt.close(fig_iso)
+
+                # แสดงตารางสรุปแบบสมุดโน้ตบุ๊ก
                 st.markdown("**ตารางสรุปผลการจัดกลุ่ม ISO:**")
                 st.dataframe(df_iso_group.style.highlight_max(subset=['Average Sharpness'], color='lightgreen'))
             else:
-                st.info("💡 ไม่พบพารามิเตอร์ ISO ในอภิข้อมูลภาพ")
+                st.info("💡 ไม่พบพารามิเตอร์ ISO ในอภิข้อมูลภาพที่จะจำแนกกลุ่มสถิติ")
 
     with tab4:
         for r in data_records:
@@ -257,7 +265,7 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
             with col2:
                 fig2, ax2 = plt.subplots()
                 ax2.imshow(r["Image Data"]["canny"], cmap='gray')
-                ax2.set_title(f"Canny Edges (Density: {r['Edge Density (%)']}%)")
+                ax2.set_title(f"Canny Edges (Density: {r['Edge Density (%)']}% ")
                 ax2.axis('off')
                 st.pyplot(fig2)
                 plt.close(fig2)
