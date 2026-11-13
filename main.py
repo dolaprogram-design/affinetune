@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import os
 import cv2
 import rawpy
@@ -47,9 +47,9 @@ def process_uploaded_files(uploaded_files):
                 meta = et.get_metadata(temp_path)[0]
 
             camera = meta.get("EXIF:Model", "Unknown Camera")
-            lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens") 
+            lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens")
                            if meta.get("EXIF:LensModel") else "Unknown Lens")
-            iso = meta.get("EXIF:ISO", "N/A")
+            iso_raw = meta.get("EXIF:ISO", "No EXIF")
             aperture = meta.get("EXIF:FNumber", "N/A")
             shutter = meta.get("EXIF:ExposureTime", "N/A")
             focal = meta.get("EXIF:FocalLength", "N/A")
@@ -91,7 +91,7 @@ def process_uploaded_files(uploaded_files):
             roi = gray[sy:ey, sx:ex]
             roi_rgb = rgb_image[sy:ey, sx:ex].copy()
 
-            # Calculate Sharpness (Laplacian Var), Edge Density (Canny), Contrast (Std) -> Convert all to integers
+            # Calculate Sharpness, Edge Density, Contrast -> Convert to Integers
             score_raw = np.var(cv2.Laplacian(roi, cv2.CV_64F)) if roi.size > 0 else 0.0
             score = int(round(score_raw))
 
@@ -107,14 +107,14 @@ def process_uploaded_files(uploaded_files):
             contrast_raw = np.std(roi) if roi.size > 0 else 0.0
             contrast = int(round(contrast_raw))
 
-            # Downsample preview images to save server-client rendering memory
+            # Downsample preview images
             preview_w = int(w * 0.25)
             preview_h = int(h * 0.25)
             rgb_resized = cv2.resize(rgb_image, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
 
             records.append({
                 "File Name": f_upload.name,
-                "Camera": camera, "Lens": lens, "ISO": iso,
+                "Camera": camera, "Lens": lens, "ISO": iso_raw,
                 "Aperture (F-Stop)": aperture, "Shutter Speed": shutter, "Focal Length": focal,
                 "Focus Mode": af_mode, "AF Area Mode": af_area, "AF Fine Tune Adj": af_tune,
                 "Focus Distance (m)": focus_dist, "Roll Angle": roll, "Pitch Angle": pitch,
@@ -129,11 +129,10 @@ def process_uploaded_files(uploaded_files):
                     "center_scaled": (int(cx * 0.25), int(cy * 0.25))
                 }
             })
-            
-            # Clean up immediately after appending variables
+
             del rgb_image, gray, roi, rgb_resized, roi_rgb, canny
             gc.collect()
-            
+
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดกับไฟล์ {f_upload.name}: {e}")
         finally:
@@ -171,7 +170,7 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗂️ 1. ข้อมูลอภิมานเชิงลึก",
         "🔍 2. ภาพจุดโฟกัส & ROI",
-        "📊 3. เปรียบเทียบ Sharpness",
+        "📊 3. เปรียบเทียบ Sharpness & ISO (Notebook Style)",
         "📐 4. Edge & Histogram",
         "📈 5. ความสัมพันธ์เชิงสถิติ"
     ])
@@ -204,13 +203,45 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
                 plt.close(fig2)
 
     with tab3:
-        fig_bar, ax_bar = plt.subplots(figsize=(10, 4))
-        sns.barplot(data=df, x='File Name', y='Sharpness Score', ax=ax_bar, palette='viridis')
-        for container in ax_bar.containers:
-            ax_bar.bar_label(container, fmt='%d', fontweight='bold', padding=5)
-        plt.xticks(rotation=45, ha='right')
-        st.pyplot(fig_bar)
-        plt.close(fig_bar)
+        st.subheader("📊 สถิติเปรียบเทียบ Sharpness และความสัมพันธ์ของกลุ่ม ISO")
+        col_left, col_right = st.columns(2)
+
+        with col_left:
+            st.markdown("**🔬 Sharpness Score รายภาพ**")
+            fig_bar, ax_bar = plt.subplots(figsize=(8, 5))
+            sns.barplot(data=df, x='File Name', y='Sharpness Score', ax=ax_bar, palette='viridis')
+            for container in ax_bar.containers:
+                ax_bar.bar_label(container, fmt='%d', fontweight='bold', padding=5)
+            plt.xticks(rotation=45, ha='right')
+            st.pyplot(fig_bar)
+            plt.close(fig_bar)
+
+        with col_right:
+            st.markdown("**📈 ค่าเฉลี่ย Sharpness จำแนกตามกลุ่ม ISO (Average ISO Group)**")
+            df_valid_iso = df[df['ISO'] != 'No EXIF'].copy()
+            if not df_valid_iso.empty:
+                df_valid_iso['ISO'] = pd.to_numeric(df_valid_iso['ISO'], errors='coerce')
+                df_valid_iso = df_valid_iso.dropna(subset=['ISO'])
+
+                df_iso_group = df_valid_iso.groupby('ISO')['Sharpness Score'].agg(['mean', 'count']).reset_index()
+                df_iso_group.columns = ['ISO', 'Average Sharpness', 'Image Count']
+                df_iso_group['Average Sharpness'] = df_iso_group['Average Sharpness'].round().astype(int)
+
+                fig_iso, ax_iso = plt.subplots(figsize=(8, 5))
+                x_labels = [f"ISO {int(x)}" for x in df_iso_group['ISO']]
+                bars = ax_iso.bar(x_labels, df_iso_group['Average Sharpness'], color='teal', edgecolor='darkslategrey', alpha=0.85)
+                ax_iso.set_ylabel('Average Sharpness (Laplacian Var)', fontweight='bold')
+                ax_iso.set_xlabel('ISO Group', fontweight='bold')
+                for bar in bars:
+                    yval = bar.get_height()
+                    ax_iso.text(bar.get_x() + bar.get_width()/2.0, yval + 5, f'{int(yval)}', ha='center', va='bottom', fontweight='bold')
+
+                st.pyplot(fig_iso)
+                plt.close(fig_iso)
+                st.markdown("**ตารางสรุปผลการจัดกลุ่ม ISO:**")
+                st.dataframe(df_iso_group.style.highlight_max(subset=['Average Sharpness'], color='lightgreen'))
+            else:
+                st.info("💡 ไม่พบพารามิเตอร์ ISO ในอภิข้อมูลภาพ")
 
     with tab4:
         for r in data_records:
