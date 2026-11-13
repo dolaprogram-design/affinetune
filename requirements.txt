@@ -5,3 +5,4 @@ pyexiftool
 matplotlib
 pandas
 numpy
+seabon
