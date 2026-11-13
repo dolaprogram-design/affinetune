@@ -25,7 +25,6 @@ possible_paths = [
 
 for path in possible_paths:
     try:
-        # ทดสอบการเรียกใช้งานผ่าน subprocess
         result = subprocess.run([path, "-ver"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if result.returncode == 0:
             EXIFTOOL_PATH = path
@@ -66,12 +65,21 @@ def process_uploaded_files(uploaded_files):
             gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
             h, w = gray.shape
 
-            af_w = meta.get("MakerNotes:AFImageWidth", w*2)
-            af_h = meta.get("MakerNotes:AFImageHeight", h*2)
+            af_w = meta.get("MakerNotes:AFImageWidth", None)
+            af_h = meta.get("MakerNotes:AFImageHeight", None)
             af_x = meta.get("MakerNotes:AFAreaXPosition", None)
             af_y = meta.get("MakerNotes:AFAreaYPosition", None)
 
-            cx, cy = int(af_x * (w/af_w)), int(af_y * (h/af_h)) if af_x and af_y else (w//2, h//2)
+            # ตรวจสอบและคำนวณสเกลอย่างปลอดภัยเพื่อป้องกัน NoneType Error
+            if af_x is not None and af_y is not None and af_w is not None and af_h is not None and float(af_w) > 0 and float(af_h) > 0:
+                cx = int(af_x * (w / float(af_w)))
+                cy = int(af_y * (h / float(af_h)))
+            elif af_x is not None and af_y is not None:
+                # หากมีพิกัดดิบแต่ไม่มีขนาดเซนเซอร์อ้างอิง ให้ใช้สมมติฐานครึ่งหนึ่งแบบทั่วไป (Half-size)
+                cx, cy = int(af_x) // 2, int(af_y) // 2
+            else:
+                cx, cy = w // 2, h // 2
+
             box_size = int(min(h, w) * 0.15)
             box_size += 1 if box_size % 2 != 0 else 0
             half_box = box_size // 2
@@ -82,10 +90,15 @@ def process_uploaded_files(uploaded_files):
             roi = gray[sy:ey, sx:ex]
             roi_rgb = rgb_image[sy:ey, sx:ex]
 
-            score = np.var(cv2.Laplacian(roi, cv2.CV_64F))
-            high_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            canny = cv2.Canny(roi, 0.5 * high_thresh, high_thresh)
-            edge_density = (np.sum(canny > 0) / canny.size) * 100
+            score = np.var(cv2.Laplacian(roi, cv2.CV_64F)) if roi.size > 0 else 0.0
+            
+            if roi.size > 0:
+                high_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                canny = cv2.Canny(roi, 0.5 * high_thresh, high_thresh)
+                edge_density = (np.sum(canny > 0) / canny.size) * 100
+            else:
+                canny = np.zeros((10,10))
+                edge_density = 0.0
 
             records.append({
                 "File Name": f_upload.name,
@@ -117,10 +130,10 @@ if uploaded_files:
     if data_records:
         df = pd.DataFrame([{k: v for k, v in r.items() if k != "Image Data"} for r in data_records])
         tab1, tab2 = st.tabs(["🗂️ ข้อมูลพารามิเตอร์", "🔍 ภาพจุดโฟกัส"])
-        
+
         with tab1:
             st.dataframe(df)
-            
+
         with tab2:
             selected_file = st.selectbox("เลือกภาพ:", df["File Name"].tolist())
             img_data = next((r["Image Data"] for r in data_records if r["File Name"] == selected_file), None)
