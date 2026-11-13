@@ -26,7 +26,7 @@ for path in possible_paths:
     except Exception:
         continue
 
-# Initialize Session State
+# Initialize Session State สำหรับเก็บประวัติ (ไม่หายแม้อัปโหลดไฟล์ใหม่)
 if 'history_records' not in st.session_state:
     st.session_state['history_records'] = []
 
@@ -37,12 +37,10 @@ def process_single_file(f_upload):
         temp_path = temp_file.name
 
     try:
-        # 1. อ่าน Metadata ด้วย Exiftool แบบละเอียดสุด
         et_executable = EXIFTOOL_PATH if EXIFTOOL_PATH else "exiftool"
         with exiftool.ExifToolHelper(executable=et_executable) as et:
             meta = et.get_metadata(temp_path)[0]
 
-        # คัดกรอง Metadata สำหรับแสดงผล (ตัดพวกข้อมูล Binary ยาวๆ ออก)
         clean_meta = {k: v for k, v in meta.items() if isinstance(v, (int, float, str)) and len(str(v)) < 250}
 
         camera = meta.get("EXIF:Model", "Unknown Camera")
@@ -52,7 +50,6 @@ def process_single_file(f_upload):
         shutter = meta.get("EXIF:ExposureTime", "N/A")
         focal = meta.get("EXIF:FocalLength", "N/A")
         
-        # ข้อมูลเชิงลึกเพิ่มเติมตามโจทย์
         af_tune = meta.get("MakerNotes:AFFineTuneAdj", "N/A")
         if af_tune == "N/A" and "MakerNotes:AFFineTune" in meta:
             af_tune = meta.get("MakerNotes:AFFineTune")
@@ -61,14 +58,12 @@ def process_single_file(f_upload):
         af_mode = meta.get("MakerNotes:FocusMode", "N/A")
         roll = float(meta.get("MakerNotes:RollAngle", np.nan))
 
-        # 2. ประมวลผลภาพ RAW (ลดขนาดลงครึ่งหนึ่งทันทีเพื่อประหยัด RAM)
         with rawpy.imread(temp_path) as raw:
             rgb_image = raw.postprocess(half_size=True, use_camera_wb=True)
 
         gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
         h, w = gray.shape
 
-        # 3. คำนวณจุดโฟกัสที่กล้องบันทึกไว้ (Recorded AF Point)
         af_w = meta.get("MakerNotes:AFImageWidth", None)
         af_h = meta.get("MakerNotes:AFImageHeight", None)
         af_x = meta.get("MakerNotes:AFAreaXPosition", None)
@@ -82,20 +77,16 @@ def process_single_file(f_upload):
         else:
             cx, cy = w // 2, h // 2
 
-        # 4. คำนวณหา "จุดที่ชัดที่สุด" จริงๆ ในภาพ (Peak Sharpness Point)
-        # ย่อขนาดลงอีกเพื่อความรวดเร็วและประหยัด RAM ในการสแกนหาจุดชัด
         scan_scale = 4 
         gray_small = cv2.resize(gray, (w // scan_scale, h // scan_scale))
         lap = cv2.Laplacian(gray_small, cv2.CV_32F)
-        lap_var = cv2.boxFilter(lap**2, -1, (15, 15)) # หาความแปรปรวนในพื้นที่ (Local Variance)
+        lap_var = cv2.boxFilter(lap**2, -1, (15, 15))
         _, _, _, max_loc = cv2.minMaxLoc(lap_var)
         peak_cx = max_loc[0] * scan_scale
         peak_cy = max_loc[1] * scan_scale
         
-        # คำนวณระยะห่างระหว่างจุดที่กล้องโฟกัส กับ จุดที่ชัดที่สุดจริง (Focus Shift)
         focus_shift_px = int(math.hypot(cx - peak_cx, cy - peak_cy))
 
-        # 5. ดึง ROI บริเวณที่กล้องโฟกัส
         box_size = int(min(h, w) * 0.15)
         box_size += 1 if box_size % 2 != 0 else 0
         half_box = box_size // 2
@@ -105,7 +96,6 @@ def process_single_file(f_upload):
         roi = gray[sy:ey, sx:ex]
         roi_rgb = rgb_image[sy:ey, sx:ex].copy()
 
-        # คำนวณคุณภาพในบริเวณ ROI
         score = int(round(np.var(cv2.Laplacian(roi, cv2.CV_64F)))) if roi.size > 0 else 0
         contrast = int(round(np.std(roi))) if roi.size > 0 else 0
 
@@ -117,7 +107,6 @@ def process_single_file(f_upload):
             canny = np.zeros((10,10))
             edge_density = 0
 
-        # 6. สร้างภาพ Preview ขนาดย่อสุดๆ สำหรับแสดงผลหน้าเว็บ
         preview_scale = 0.25
         preview_w, preview_h = int(w * preview_scale), int(h * preview_scale)
         rgb_resized = cv2.resize(rgb_image, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
@@ -149,11 +138,10 @@ def process_single_file(f_upload):
             }
         }
 
-        # ลบข้อมูลเก่าที่มีชื่อซ้ำออกก่อนเพิ่มใหม่
+        # ลบข้อมูลเก่าที่ชื่อซ้ำออกก่อนอัปเดตใหม่
         st.session_state['history_records'] = [r for r in st.session_state['history_records'] if r['File Name'] != f_upload.name]
         st.session_state['history_records'].append(record)
 
-        # คืนหน่วยความจำทันที
         del rgb_image, gray, roi, rgb_resized, roi_rgb, canny, lap, lap_var, gray_small
         gc.collect()
         return True
@@ -173,10 +161,9 @@ if not EXIFTOOL_PATH:
 
 with st.sidebar:
     st.header("📂 คิวอัปโหลดไฟล์ RAW")
-    st.info("💡 สามารถอัปโหลดไฟล์ได้ไม่จำกัด (Multiple Files) ไฟล์จะเข้าสู่คิวรอ เมื่อพร้อมให้กดปุ่มประมวลผล ระบบจะทยอยอ่านทีละไฟล์เพื่อกัน RAM เต็ม")
+    st.error("🚨 สำคัญ: ระบบคลาวด์มีข้อจำกัดด้านหน่วยความจำ (RAM) และเวลาการอัปโหลด (Timeout)\n\n**แนะนำให้อัปโหลดทีละ 2-3 ไฟล์** \nเมื่อประมวลผลเสร็จแล้ว คุณสามารถลากไฟล์ชุดต่อไปมาวางทับได้เลย ระบบจะนำข้อมูลไปต่อท้ายตารางวิเคราะห์ให้โดยอัตโนมัติ (ข้อมูลเก่าไม่หาย)")
     
-    # อัปโหลดได้หลายไฟล์
-    uploaded_files = st.file_uploader("เลือกไฟล์ภาพ .NEF (เลือกได้หลายไฟล์)", type=["nef"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("เลือกไฟล์ภาพ .NEF (แนะนำทีละ 2-3 ไฟล์)", type=["nef"], accept_multiple_files=True)
 
     if uploaded_files:
         st.write(f"เตรียมประมวลผล: {len(uploaded_files)} ไฟล์")
@@ -187,14 +174,14 @@ with st.sidebar:
             for i, f in enumerate(uploaded_files):
                 status_text.text(f"กำลังประมวลผล ({i+1}/{len(uploaded_files)}): {f.name} ...")
                 
-                # เช็คว่าเคยประมวลผลหรือยัง
+                # เช็คว่าเคยประมวลผลไฟล์นี้ไปแล้วหรือยัง (เช็คจากชื่อ)
                 if not any(r['File Name'] == f.name for r in st.session_state['history_records']):
                     process_single_file(f)
                 
                 progress_bar.progress((i + 1) / len(uploaded_files))
             
             status_text.text("✅ ประมวลผลเสร็จสมบูรณ์!")
-            st.success("ดึงข้อมูลและวิเคราะห์ภาพสำเร็จ สามารถดูผลลัพธ์ใน Dashboard ได้เลย")
+            st.success("สามารถดูลากไฟล์ชุดต่อไปมาอัปโหลดเพิ่มได้เลย!")
 
     st.divider()
     if st.button("🗑️ ล้างข้อมูลประวัติทั้งหมด"):
@@ -203,6 +190,7 @@ with st.sidebar:
 
 # --- Dashboard ---
 if len(st.session_state['history_records']) > 0:
+    st.success(f"📊 ปัจจุบันมีข้อมูลไฟล์ในระบบทั้งหมด {len(st.session_state['history_records'])} ไฟล์")
     tab_compare, tab_detail, tab_meta = st.tabs([
         "📊 1. ตารางเปรียบเทียบข้อมูลไฟล์ (Comparison)", 
         "🖼️ 2. วิเคราะห์จุดโฟกัส (Focus Accuracy)", 
@@ -211,7 +199,6 @@ if len(st.session_state['history_records']) > 0:
 
     with tab_compare:
         st.subheader("ตารางเปรียบเทียบสถิติและคุณภาพเลนส์จากไฟล์ทั้งหมด")
-        # สร้าง Dataframe สำหรับแสดงผลเปรียบเทียบ
         df_compare = pd.DataFrame([{
             "File Name": r["File Name"],
             "Camera": r["Camera"],
@@ -262,15 +249,12 @@ if len(st.session_state['history_records']) > 0:
             fig, ax = plt.subplots(figsize=(10, 7))
             ax.imshow(imgs["preview_rgb"])
             
-            # วาดกรอบ ROI
             sx, sy, ex, ey = imgs["box_scaled"]
             ax.add_patch(patches.Rectangle((sx, sy), ex-sx, ey-sy, linewidth=1.5, edgecolor='cyan', facecolor='none'))
             
-            # จุดโฟกัสที่กล้องบันทึก
             cx, cy = imgs["center_scaled"]
             ax.scatter(cx, cy, color='red', marker='+', s=150, linewidths=2, label='Recorded AF Point (กล้องบันทึก)')
             
-            # จุดที่ภาพชัดที่สุดจริงๆ จากการคำนวณ Laplacian
             px, py = imgs["peak_scaled"]
             ax.scatter(px, py, color='lime', marker='o', s=100, facecolors='none', linewidths=2, label='Actual Sharpest Point (ชัดที่สุดจริง)')
             
@@ -305,9 +289,8 @@ if len(st.session_state['history_records']) > 0:
         
         st.write(f"**Camera:** {curr_meta_data['Camera']} | **Lens:** {curr_meta_data['Lens']}")
         
-        # แสดง Metadata แบบ DataFrame ให้ค้นหาและดูง่าย
         meta_df = pd.DataFrame(list(curr_meta_data["Full Metadata"].items()), columns=["Metadata Tag", "Value"])
         st.dataframe(meta_df, use_container_width=True, height=500)
         
 else:
-    st.info("👈 กรุณาเลือกไฟล์และกด 'เริ่มทำการประมวลผลทั้งหมด' ที่แถบด้านซ้าย เพื่อดูข้อมูลเปรียบเทียบ")
+    st.info("👈 กรุณาเลือกไฟล์และกด 'เริ่มทำการประมวลผล' ที่แถบด้านซ้าย เพื่อดูข้อมูลเปรียบเทียบ")
