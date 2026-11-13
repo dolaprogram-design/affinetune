@@ -5,4 +5,3 @@ pyexiftool
 matplotlib
 pandas
 numpy
-seaborn
