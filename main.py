@@ -1,309 +1,415 @@
-import streamlit as st
-import os, cv2, rawpy, numpy as np, pandas as pd, exiftool, tempfile, gc, subprocess, math
+import os
+import cv2
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import seaborn as sns
+from PIL import Image
+import gradio as gr
+import subprocess
+import json
+import tempfile
+import gc
+import warnings
+warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="RAW Image Advanced Analytics", page_icon="📸", layout="wide")
+# สร้าง Temp Directory สำหรับเก็บภาพ Thumbnail เพื่อลดการใช้ RAM ของเบราว์เซอร์
+TEMP_DIR = tempfile.mkdtemp()
 
-EXIFTOOL_PATH = None
-possible_paths = [
-    "./exiftool_bin/exiftool",
-    "/opt/render/project/src/exiftool_bin/exiftool",
-    "exiftool",
-    "/usr/bin/exiftool",
-    "/usr/local/bin/exiftool"
-]
+# ==========================================
+# Backend Functions สำหรับ Dashboard
+# ==========================================
 
-for path in possible_paths:
+def extract_preview(fpath, temp_dir):
+    """ดึงภาพ Preview จากไฟล์ RAW โดยใช้ ExifTool เพื่อไม่ให้เปลือง RAM"""
     try:
-        result = subprocess.run([path, "-ver"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if result.returncode == 0:
-            EXIFTOOL_PATH = path
-            break
-    except Exception:
-        continue
-
-if 'history_records' not in st.session_state:
-    st.session_state['history_records'] = []
-
-def process_single_file(f_upload):
-    # เขียนไฟล์ลง Temp ทันทีและล้างค่าในหน่วยความจำ
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".NEF") as temp_file:
-        temp_file.write(f_upload.getvalue())
-        temp_path = temp_file.name
-
-    try:
-        et_executable = EXIFTOOL_PATH if EXIFTOOL_PATH else "exiftool"
-        with exiftool.ExifToolHelper(executable=et_executable) as et:
-            meta = et.get_metadata(temp_path)[0]
-
-        clean_meta = {k: v for k, v in meta.items() if isinstance(v, (int, float, str)) and len(str(v)) < 250}
-
-        camera = meta.get("EXIF:Model", "Unknown Camera")
-        lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens"))
-        iso_raw = meta.get("EXIF:ISO", "No EXIF")
-        aperture = meta.get("EXIF:FNumber", "N/A")
-        shutter = meta.get("EXIF:ExposureTime", "N/A")
-        focal = meta.get("EXIF:FocalLength", "N/A")
-        
-        af_tune = meta.get("MakerNotes:AFFineTuneAdj", "N/A")
-        if af_tune == "N/A" and "MakerNotes:AFFineTune" in meta:
-            af_tune = meta.get("MakerNotes:AFFineTune")
+        cmd_img = ['exiftool', '-b', '-JpgFromRaw', fpath]
+        res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
+        if not res_img.stdout:
+            cmd_img = ['exiftool', '-b', '-PreviewImage', fpath]
+            res_img = subprocess.run(cmd_img, stdout=subprocess.PIPE)
             
-        af_mode = meta.get("MakerNotes:FocusMode", "N/A")
-
-        # ดึง Embedded JPEG
-        rgb_image = None
-        preview_process = subprocess.run([et_executable, "-b", "-JpgFromRaw", temp_path], capture_output=True)
-        preview_data = preview_process.stdout
-        
-        if not preview_data:
-            preview_process = subprocess.run([et_executable, "-b", "-PreviewImage", temp_path], capture_output=True)
-            preview_data = preview_process.stdout
-            
-        if preview_data:
-            image_np = np.frombuffer(preview_data, np.uint8)
-            rgb_image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
-            if rgb_image is not None:
-                rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
-        
-        if rgb_image is None:
-            with rawpy.imread(temp_path) as raw:
-                rgb_image = raw.postprocess(half_size=True, use_camera_wb=True)
-
-        gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
-        h, w = gray.shape
-
-        af_w = meta.get("MakerNotes:AFImageWidth", None)
-        af_h = meta.get("MakerNotes:AFImageHeight", None)
-        af_x = meta.get("MakerNotes:AFAreaXPosition", None)
-        af_y = meta.get("MakerNotes:AFAreaYPosition", None)
-
-        if af_x is not None and af_y is not None and af_w is not None and af_h is not None and float(af_w) > 0 and float(af_h) > 0:
-            cx = int(af_x * (w / float(af_w)))
-            cy = int(af_y * (h / float(af_h)))
-        elif af_x is not None and af_y is not None:
-            cx, cy = int(af_x) // 2, int(af_y) // 2
-        else:
-            cx, cy = w // 2, h // 2
-
-        scan_scale = 4 
-        gray_small = cv2.resize(gray, (w // scan_scale, h // scan_scale))
-        lap = cv2.Laplacian(gray_small, cv2.CV_32F)
-        lap_var = cv2.boxFilter(lap**2, -1, (15, 15))
-        _, _, _, max_loc = cv2.minMaxLoc(lap_var)
-        peak_cx = max_loc[0] * scan_scale
-        peak_cy = max_loc[1] * scan_scale
-        
-        focus_shift_px = int(math.hypot(cx - peak_cx, cy - peak_cy))
-
-        box_size = int(min(h, w) * 0.15)
-        box_size += 1 if box_size % 2 != 0 else 0
-        half_box = box_size // 2
-        sx, ex = max(0, cx - half_box), min(w, cx + half_box)
-        sy, ey = max(0, cy - half_box), min(h, cy + half_box)
-
-        roi = gray[sy:ey, sx:ex]
-        roi_rgb = rgb_image[sy:ey, sx:ex].copy()
-
-        score = int(round(np.var(cv2.Laplacian(roi, cv2.CV_64F)))) if roi.size > 0 else 0
-        contrast = int(round(np.std(roi))) if roi.size > 0 else 0
-
-        if roi.size > 0:
-            high_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            canny = cv2.Canny(roi, 0.5 * high_thresh, high_thresh)
-            edge_density = int(round((np.sum(canny > 0) / canny.size) * 100))
-        else:
-            canny = np.zeros((10,10))
-            edge_density = 0
-
-        preview_scale = 0.25
-        preview_w, preview_h = int(w * preview_scale), int(h * preview_scale)
-        rgb_resized = cv2.resize(rgb_image, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
-
-        record = {
-            "File Name": f_upload.name,
-            "Camera": camera, 
-            "Lens": lens, 
-            "ISO": iso_raw,
-            "Aperture": aperture, 
-            "Shutter Speed": shutter, 
-            "Focal Length": focal,
-            "AF Fine-Tune": af_tune,
-            "Focus Mode": af_mode,
-            "Recorded Focus (X,Y)": f"({cx}, {cy})",
-            "Actual Sharpest (X,Y)": f"({peak_cx}, {peak_cy})",
-            "Focus Shift (px)": focus_shift_px,
-            "Sharpness Score": score, 
-            "Edge Density (%)": edge_density, 
-            "Contrast": contrast,
-            "Full Metadata": clean_meta,
-            "Images": {
-                "preview_rgb": rgb_resized,
-                "roi_rgb": roi_rgb,
-                "canny": canny,
-                "box_scaled": (int(sx * preview_scale), int(sy * preview_scale), int(ex * preview_scale), int(ey * preview_scale)),
-                "center_scaled": (int(cx * preview_scale), int(cy * preview_scale)),
-                "peak_scaled": (int(peak_cx * preview_scale), int(peak_cy * preview_scale))
-            }
-        }
-
-        st.session_state['history_records'] = [r for r in st.session_state['history_records'] if r['File Name'] != f_upload.name]
-        st.session_state['history_records'].append(record)
-
-        del rgb_image, gray, roi, rgb_resized, roi_rgb, canny, lap, lap_var, gray_small
-        gc.collect()
-        return True
-
+        if res_img.stdout:
+            nparr = np.frombuffer(res_img.stdout, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            return img
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการประมวลผล {f_upload.name}: {e}")
-        return False
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        print(f"Error extracting preview: {e}")
+    return None
+
+def process_dashboard_images(file_paths, progress=gr.Progress()):
+    if not file_paths:
+        return [], pd.DataFrame(), pd.DataFrame()
+
+    data = []
+    gallery_items = []
+    
+    # วนลูปพร้อมแสดง Progress Bar
+    for i, fpath in progress.tqdm(enumerate(file_paths), desc="กำลังวิเคราะห์ภาพ...", total=len(file_paths)):
+        filename = os.path.basename(fpath)
+
+        iso_value, focal_length, exposure_time = None, None, None
+        camera_model, af_point, focus_dist, lens_info = "N/A", "N/A", "N/A", "N/A"
+        sharpness = 0.0
+
+        try:
+            # 1. อ่านข้อมูล MakerNotes ด้วย ExifTool
+            cmd = ['exiftool', '-j', fpath]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+            exif_data = json.loads(res.stdout)[0]
+
+            iso_val = exif_data.get('ISO', exif_data.get('ISOSpeedRatings', None))
+            if iso_val is not None:
+                try: iso_value = int(iso_val)
+                except: pass
+
+            fl = exif_data.get('FocalLength', None)
+            if fl:
+                try: focal_length = float(str(fl).replace(' mm', '').strip())
+                except: pass
+
+            et = exif_data.get('ExposureTime', None)
+            if et:
+                try:
+                    if isinstance(et, str) and '/' in et:
+                        num, den = et.split('/')
+                        exposure_time = float(num) / float(den)
+                    else:
+                        exposure_time = float(et)
+                except: pass
+
+            camera_model = exif_data.get('Model', "N/A")
+            af_point = exif_data.get('PrimaryAFPoint', exif_data.get('AFPointsUsed', "N/A"))
+            focus_dist = exif_data.get('FocusDistance', exif_data.get('ApproximateFocusDistance', "N/A"))
+            lens_info = exif_data.get('LensID', exif_data.get('Lens', "N/A"))
+            
+            # 2. คำนวณความคมชัด
+            img_preview = extract_preview(fpath, TEMP_DIR)
+            if img_preview is not None:
+                gray = cv2.cvtColor(img_preview, cv2.COLOR_BGR2GRAY)
+                sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                
+                # บันทึกภาพย่อสำหรับ Gallery (ลดขนาดเพื่อป้องกันหน้าเว็บค้าง)
+                preview_h, preview_w = gray.shape
+                scale = min(1.0, 800.0 / max(preview_h, preview_w))
+                if scale < 1.0:
+                    img_preview = cv2.resize(img_preview, (int(preview_w * scale), int(preview_h * scale)))
+                
+                temp_jpg_path = os.path.join(TEMP_DIR, f"thumb_{i}.jpg")
+                cv2.imwrite(temp_jpg_path, img_preview)
+                
+                rating = "🔴 Blur" if sharpness < 100 else "🟡 Fair" if sharpness < 500 else "🟢 Good" if sharpness < 1500 else "⭐ Excellent"
+                caption = f"{filename}\nScore: {sharpness:.2f} ({rating})"
+                gallery_items.append((temp_jpg_path, caption))
+                
+                del gray, img_preview
+            else:
+                rating = "⚠️ Cannot Read"
+
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
+            rating = "⚠️ Error"
+
+        shutter = "N/A"
+        if exposure_time:
+            shutter = f"{exposure_time:.1f}s" if exposure_time >= 1 else f"1/{int(round(1/exposure_time))}"
+
+        data.append({
+            "Filename": filename,
+            "Model": camera_model,
+            "Sharpness": round(sharpness, 2),
+            "Quality": rating,
+            "ISO": iso_value,
+            "FocalLength_mm": focal_length,
+            "ShutterSpeed": shutter,
+            "ExposureTime_sec": exposure_time,
+            "AF_Point": af_point,
+            "Focus_Dist": focus_dist,
+            "Lens": lens_info
+        })
+        
+        # คืนหน่วยความจำทันทีหลังจบแต่ละลูป
         gc.collect()
 
-# --- UI Components ---
-st.title("📸 RAW Analytics: Multi-File & AF Accuracy Analysis (Render Fixed)")
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df = df.sort_values(by='Sharpness', ascending=False)
 
-st.error("🚨 **หากคุณพบ Error 502 / แดชบอร์ดดับ** 
-สาเหตุเกิดจาก **RAM ของเซิร์ฟเวอร์คลาวด์เต็ม** ในจังหวะที่รับไฟล์ขนาดใหญ่หลายไฟล์พร้อมกัน เพื่อป้องกันการล่ม **กรุณาอัปโหลดไฟล์ครั้งละ 1-2 ไฟล์เท่านั้น** ข้อมูลจะถูกบันทึกสะสมไว้ในตารางด้านล่างอัตโนมัติ")
+    return gallery_items, df, df
 
-if not EXIFTOOL_PATH:
-    st.warning("⚠️ ไม่พบ Exiftool ในระบบ การอ่านค่าบางอย่างอาจไม่สมบูรณ์")
+def update_plots(df):
+    if df is None or df.empty:
+        return None, None, None, None
 
-with st.sidebar:
-    st.header("📂 คิวอัปโหลดไฟล์ RAW")
-    st.info("💡 ข้อจำกัดระบบ: กรุณาอัปโหลดทีละ 1-2 ไฟล์ เพื่อป้องกันเซิร์ฟเวอร์น็อค (Error 502)")
-    
-    uploaded_files = st.file_uploader("เลือกไฟล์ภาพ .NEF (อัปโหลดครั้งละ 1-2 ไฟล์)", type=["nef"], accept_multiple_files=True)
+    fig_iso = plt.figure(figsize=(6, 4))
+    df_iso = df.dropna(subset=['ISO']).copy()
+    if not df_iso.empty:
+        df_iso_grp = df_iso.groupby('ISO')['Sharpness'].mean().reset_index()
+        plt.bar([str(int(x)) for x in df_iso_grp['ISO']], df_iso_grp['Sharpness'], color='#8b5cf6')
+        plt.title('Average Sharpness by ISO', fontweight='bold')
+        plt.xlabel('ISO')
+        plt.ylabel('Sharpness')
+    plt.tight_layout()
 
-    if uploaded_files:
-        if len(uploaded_files) > 2:
-            st.error("❌ จำนวนไฟล์มากเกินไป เซิร์ฟเวอร์อาจล่มได้ กรุณาลบออกให้เหลือ 1-2 ไฟล์ต่อรอบ")
-        else:
-            st.write(f"เตรียมประมวลผล: {len(uploaded_files)} ไฟล์")
-            if st.button("⚡ เริ่มทำการประมวลผลทั้งหมด", type="primary"):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for i, f in enumerate(uploaded_files):
-                    status_text.text(f"กำลังประมวลผล ({i+1}/{len(uploaded_files)}): {f.name} ...")
-                    
-                    if not any(r['File Name'] == f.name for r in st.session_state['history_records']):
-                        process_single_file(f)
-                    
-                    progress_bar.progress((i + 1) / len(uploaded_files))
-                
-                status_text.text("✅ ประมวลผลเสร็จสมบูรณ์!")
-                st.success("สำเร็จ! คุณสามารถลากไฟล์อีก 1-2 ไฟล์มาอัปโหลดเพิ่มต่อได้เลย")
+    fig_focal = plt.figure(figsize=(6, 4))
+    df_foc = df.dropna(subset=['FocalLength_mm']).copy()
+    if not df_foc.empty:
+        plt.scatter(df_foc['FocalLength_mm'], df_foc['Sharpness'], color='#10b981', s=80, alpha=0.8)
+        plt.title('Focal Length vs Sharpness', fontweight='bold')
+        plt.xlabel('Focal Length (mm)')
+        plt.ylabel('Sharpness Score')
+        plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
 
-    st.divider()
-    if st.button("🗑️ ล้างข้อมูลประวัติทั้งหมด"):
-        st.session_state['history_records'] = []
-        st.rerun()
+    fig_shutter = plt.figure(figsize=(6, 4))
+    df_shut = df.dropna(subset=['ExposureTime_sec']).copy()
+    if not df_shut.empty:
+        plt.scatter(df_shut['ExposureTime_sec'], df_shut['Sharpness'], color='#f59e0b', s=80, alpha=0.8)
+        plt.title('Shutter Speed vs Sharpness', fontweight='bold')
+        plt.xlabel('Exposure Time (sec) [Log Scale]')
+        plt.ylabel('Sharpness Score')
+        plt.xscale('log')
+        plt.grid(True, which="both", linestyle='--', alpha=0.5)
+    plt.tight_layout()
 
-# --- Dashboard ---
-if len(st.session_state['history_records']) > 0:
-    st.success(f"📊 ปัจจุบันมีข้อมูลไฟล์ในระบบทั้งหมด {len(st.session_state['history_records'])} ไฟล์")
-    tab_compare, tab_detail, tab_meta = st.tabs([
-        "📊 1. ตารางเปรียบเทียบข้อมูลไฟล์ (Comparison)", 
-        "🖼️ 2. วิเคราะห์จุดโฟกัส (Focus Accuracy)", 
-        "🗂️ 3. ข้อมูล Metadata เชิงลึก"
-    ])
+    fig_af = plt.figure(figsize=(6, 4))
+    df_af = df[df['AF_Point'] != 'N/A'].dropna(subset=['AF_Point', 'Sharpness']).copy()
+    if not df_af.empty:
+        df_af_grp = df_af.groupby('AF_Point')['Sharpness'].mean().reset_index()
+        df_af_grp = df_af_grp.sort_values('Sharpness', ascending=False)
+        plt.bar(df_af_grp['AF_Point'].astype(str), df_af_grp['Sharpness'], color='#ec4899')
+        plt.title('Average Sharpness by AF Point', fontweight='bold')
+        plt.xlabel('AF Point')
+        plt.ylabel('Average Sharpness')
+        plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
 
-    with tab_compare:
-        st.subheader("ตารางเปรียบเทียบสถิติและคุณภาพเลนส์จากไฟล์ทั้งหมด")
-        df_compare = pd.DataFrame([{
-            "File Name": r["File Name"],
-            "Camera": r["Camera"],
-            "Lens": r["Lens"],
-            "AF Fine-Tune": r["AF Fine-Tune"],
-            "Focus Shift (px)": r["Focus Shift (px)"],
-            "Sharpness Score": r["Sharpness Score"],
-            "Edge Density (%)": r["Edge Density (%)"],
-            "Contrast": r["Contrast"]
-        } for r in st.session_state['history_records']])
-        
-        st.dataframe(df_compare.style.highlight_max(subset=['Sharpness Score', 'Edge Density (%)'], color='lightgreen')
-                                     .highlight_min(subset=['Focus Shift (px)'], color='lightblue'))
-        
-        if len(df_compare) > 1:
-            col_chart1, col_chart2 = st.columns(2)
-            with col_chart1:
-                fig, ax = plt.subplots(figsize=(6,4))
-                sns.barplot(data=df_compare, x='File Name', y='Sharpness Score', ax=ax, palette='viridis')
-                plt.xticks(rotation=45, ha='right')
-                ax.set_title("เปรียบเทียบความคมชัด (Sharpness Score)")
-                st.pyplot(fig)
-                plt.close(fig)
-            with col_chart2:
-                fig, ax = plt.subplots(figsize=(6,4))
-                sns.barplot(data=df_compare, x='File Name', y='Focus Shift (px)', ax=ax, palette='magma')
-                plt.xticks(rotation=45, ha='right')
-                ax.set_title("เปรียบเทียบความคลาดเคลื่อนโฟกัส (Focus Shift)")
-                st.pyplot(fig)
-                plt.close(fig)
+    return fig_iso, fig_focal, fig_shutter, fig_af
 
-    with tab_detail:
-        st.subheader("วิเคราะห์ความแม่นยำจุดโฟกัสรายภาพ")
-        file_names = [r["File Name"] for r in st.session_state['history_records']]
-        selected_file = st.selectbox("เลือกภาพที่ต้องการดูรายละเอียด:", file_names)
-        
-        curr_data = next(r for r in st.session_state['history_records'] if r["File Name"] == selected_file)
-        imgs = curr_data["Images"]
-        
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        col_m1.metric("AF Fine-Tune", curr_data["AF Fine-Tune"])
-        col_m2.metric("Focus Shift (คลาดเคลื่อน)", f"{curr_data['Focus Shift (px)']} px")
-        col_m3.metric("Sharpness", curr_data["Sharpness Score"])
-        col_m4.metric("Edge Density", f"{curr_data['Edge Density (%)']}%")
+def analyze_roi(gray_img, start_x, start_y, crop_w, crop_h):
+    roi = gray_img[start_y:start_y+crop_h, start_x:start_x+crop_w]
+    laplacian = cv2.Laplacian(roi, cv2.CV_64F)
+    return np.var(laplacian)
 
-        col_a, col_b = st.columns([2, 1])
-        with col_a:
-            fig, ax = plt.subplots(figsize=(10, 7))
-            ax.imshow(imgs["preview_rgb"])
+def fine_tune_lens(image, center_roi_percent, edge_roi_percent):
+    if image is None:
+        return None, "กรุณาอัปโหลดภาพทดสอบ"
+
+    h, w = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    img_disp = image.copy()
+    results = []
+
+    center_crop_h, center_crop_w = int(h * (center_roi_percent/100)), int(w * (center_roi_percent/100))
+    c_start_y, c_start_x = (h - center_crop_h) // 2, (w - center_crop_w) // 2
+
+    center_score = analyze_roi(gray, c_start_x, c_start_y, center_crop_w, center_crop_h)
+    cv2.rectangle(img_disp, (c_start_x, c_start_y), (c_start_x+center_crop_w, c_start_y+center_crop_h), (50, 205, 50), max(2, int(w*0.005)))
+    cv2.putText(img_disp, f"Center: {center_score:.0f}", (c_start_x, c_start_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (50, 205, 50), 2)
+    results.append(f"📍 Center Score: {center_score:.2f}")
+
+    edge_crop_h, edge_crop_w = int(h * (edge_roi_percent/100)), int(w * (edge_roi_percent/100))
+    offset_y, offset_x = int(h * 0.05), int(w * 0.05)
+
+    corners = {
+        "Top-Left": (offset_x, offset_y),
+        "Top-Right": (w - edge_crop_w - offset_x, offset_y),
+        "Bottom-Left": (offset_x, h - edge_crop_h - offset_y),
+        "Bottom-Right": (w - edge_crop_w - offset_x, h - edge_crop_h - offset_y)
+    }
+
+    edge_scores = []
+    for name, (start_x, start_y) in corners.items():
+        score = analyze_roi(gray, start_x, start_y, edge_crop_w, edge_crop_h)
+        edge_scores.append(score)
+        cv2.rectangle(img_disp, (start_x, start_y), (start_x+edge_crop_w, start_y+edge_crop_h), (255, 165, 0), max(2, int(w*0.005)))
+        cv2.putText(img_disp, f"{score:.0f}", (start_x, start_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 165, 0), 2)
+        results.append(f"📐 {name} Score: {score:.2f}")
+
+    avg_edge_score = np.mean(edge_scores)
+    results.append(f"\n📊 Average Edge Score: {avg_edge_score:.2f}")
+
+    status = "🟢 Center ผ่านเกณฑ์ (คมชัด)" if center_score > 500 else "🔴 Center ต่ำกว่าเกณฑ์"
+    edge_status = "🟢 Edges คมชัดดี" if avg_edge_score > (center_score * 0.6) else "🟡 Edges ดรอป (ขอบเบลอ)"
+
+    result_text = "[ ผลการประเมินความคมชัด ]\n" + "\n".join(results) + f"\n\n[ การวินิจฉัย ]\n- {status}\n- {edge_status}"
+
+    return img_disp, result_text
+
+def analyze_af_finetune_series(file_paths, progress=gr.Progress()):
+    if not file_paths:
+        return None, pd.DataFrame(), "ไม่พบข้อมูล"
+
+    af_tune_data = []
+
+    for i, fpath in progress.tqdm(enumerate(file_paths), desc="กำลังวิเคราะห์ AF Fine-tune...", total=len(file_paths)):
+        filename = os.path.basename(fpath)
+
+        cmd_exif = ['exiftool', '-j', '-AFFineTuneAdj', '-AFFineTune', fpath]
+        res_exif = subprocess.run(cmd_exif, stdout=subprocess.PIPE, text=True)
+
+        af_tune_val = None
+        af_tune_status = "Off"
+        try:
+            exif_info = json.loads(res_exif.stdout)[0]
+            af_tune_status = exif_info.get('AFFineTune', 'Off')
+            if 'AFFineTuneAdj' in exif_info:
+                af_tune_val = int(exif_info['AFFineTuneAdj'])
+        except:
+            pass
+
+        sharpness = 0.0
+        img_preview = extract_preview(fpath, TEMP_DIR)
+        if img_preview is not None:
+            gray = cv2.cvtColor(img_preview, cv2.COLOR_BGR2GRAY)
+            sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            del gray, img_preview
             
-            sx, sy, ex, ey = imgs["box_scaled"]
-            ax.add_patch(patches.Rectangle((sx, sy), ex-sx, ey-sy, linewidth=1.5, edgecolor='cyan', facecolor='none'))
-            
-            cx, cy = imgs["center_scaled"]
-            ax.scatter(cx, cy, color='red', marker='+', s=150, linewidths=2, label='Recorded AF Point (กล้องบันทึก)')
-            
-            px, py = imgs["peak_scaled"]
-            ax.scatter(px, py, color='lime', marker='o', s=100, facecolors='none', linewidths=2, label='Actual Sharpest Point (ชัดที่สุดจริง)')
-            
-            if math.hypot(cx - px, cy - py) > 10:
-                ax.plot([cx, px], [cy, py], color='yellow', linestyle='--', linewidth=1)
-                
-            ax.legend(loc='upper right')
-            ax.set_title(f"Focus Analysis: {curr_data['File Name']}")
-            ax.axis('off')
-            st.pyplot(fig)
-            plt.close(fig)
-            
-        with col_b:
-            fig_roi, ax_roi = plt.subplots()
-            ax_roi.imshow(imgs["roi_rgb"])
-            ax_roi.set_title("Crop Focus ROI (Original Res)")
-            ax_roi.axis('off')
-            st.pyplot(fig_roi)
-            plt.close(fig_roi)
-            
-            fig_canny, ax_canny = plt.subplots()
-            ax_canny.imshow(imgs["canny"], cmap='gray')
-            ax_canny.set_title("Canny Edges (ROI)")
-            ax_canny.axis('off')
-            st.pyplot(fig_canny)
-            plt.close(fig_canny)
+        af_tune_data.append({
+            'Filename': filename,
+            'AF Fine-tune Status': af_tune_status,
+            'AF Fine-tune Adj': af_tune_val if af_tune_val is not None else "N/A",
+            'Sharpness Score': round(sharpness, 2)
+        })
+        
+        gc.collect()
 
-    with tab_meta:
-        st.subheader("ข้อมูล Metadata เชิงลึกทั้งหมด (Raw Data)")
-        selected_meta_file = st.selectbox("เลือกภาพที่ต้องการดู Metadata:", file_names, key='meta_select')
-        curr_meta_data = next(r for r in st.session_state['history_records'] if r["File Name"] == selected_meta_file)
-        
-        st.write(f"**Camera:** {curr_meta_data['Camera']} | **Lens:** {curr_meta_data['Lens']}")
-        
-        meta_df = pd.DataFrame(list(curr_meta_data["Full Metadata"].items()), columns=["Metadata Tag", "Value"])
-        st.dataframe(meta_df, use_container_width=True, height=500)
+    df_af = pd.DataFrame(af_tune_data)
+
+    if df_af.empty:
+        return None, df_af, "ไม่สามารถวิเคราะห์ข้อมูลได้"
+
+    fig = plt.figure(figsize=(8, 5))
+    df_plot = df_af[df_af['AF Fine-tune Adj'] != 'N/A'].copy()
+
+    best_af = "ไม่พบข้อมูลเพียงพอ"
+    if not df_plot.empty:
+        df_plot['AF Fine-tune Adj'] = df_plot['AF Fine-tune Adj'].astype(int)
+        df_plot = df_plot.sort_values('AF Fine-tune Adj')
+
+        plt.plot(df_plot['AF Fine-tune Adj'], df_plot['Sharpness Score'],
+                 marker='o', color='purple', linestyle='-', linewidth=2, markersize=8)
+
+        for _, row in df_plot.iterrows():
+            plt.annotate(row['Filename'],
+                         (row['AF Fine-tune Adj'], row['Sharpness Score']),
+                         textcoords="offset points", xytext=(0, 10), ha='center', fontsize=8)
+
+        plt.title('AF Fine-tune vs Sharpness', fontweight='bold')
+        plt.xlabel('AF Fine-tune Adjustment Value')
+        plt.ylabel('Sharpness Score')
+        plt.grid(True, linestyle='--', alpha=0.5)
+
+        if len(df_plot) > 0:
+            best_af_val = df_plot.loc[df_plot['Sharpness Score'].idxmax(), 'AF Fine-tune Adj']
+            plt.axvline(x=best_af_val, color='green', linestyle=':', label=f'Best Focus: {best_af_val}')
+            plt.legend()
+            best_af = f"ค่า AF Fine-tune ที่คมชัดที่สุดคือ: {best_af_val}"
+
+    plt.tight_layout()
+    return fig, df_af, best_af
+
+
+# ==========================================
+# Gradio User Interface
+# ==========================================
+
+custom_theme = gr.themes.Soft(
+    primary_hue="indigo",
+    secondary_hue="violet",
+    neutral_hue="slate",
+    font=(gr.themes.GoogleFont("Inter"), "sans-serif"),
+)
+
+custom_css = """
+.gradio-container { background-color: #f8fafc; }
+.gr-button-primary { background: linear-gradient(to right, #6366f1, #8b5cf6); border: none; box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.3); }
+.gr-button-primary:hover { box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4); }
+.gr-panel { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); border-radius: 12px; }
+.tabs button { color: #334155 !important; font-weight: 500; }
+.tabs button.selected { color: #4f46e5 !important; font-weight: 700; }
+"""
+
+with gr.Blocks(theme=custom_theme, css=custom_css) as dashboard:
+    gr.Markdown("""
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <h1 style="color: #1e293b; font-size: 2.5rem; margin-bottom: 0.5rem;">📸 Pro Lens & Camera Analytics</h1>
+        <p style="color: #64748b; font-size: 1.1rem;">ระบบวิเคราะห์คุณภาพไฟล์ภาพและเลนส์เชิงลึกแบบอัตโนมัติ</p>
+    </div>
+    """)
+
+    df_state = gr.State(pd.DataFrame())
+
+    with gr.Tab("1. 📊 ภาพรวมและประเมินผล (Overview)"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### อัปโหลดไฟล์เพื่อวิเคราะห์")
+                file_input = gr.File(file_count="multiple", type="filepath", label="ลากไฟล์มาวางที่นี่ (JPEG, NEF, CR2...)")
+                process_btn = gr.Button("🚀 เริ่มวิเคราะห์ข้อมูลทันที", variant="primary", size="lg")
+            with gr.Column(scale=2):
+                gr.Markdown("### 🖼️ ภาพตัวอย่างและผลคะแนน")
+                gallery = gr.Gallery(label="Image Gallery", columns=4, height=350, object_fit="contain")
+
+        gr.Markdown("### 📋 ตารางสรุปพารามิเตอร์เชิงลึก (MakerNotes)")
+        data_table = gr.Dataframe(interactive=False)
+
+    with gr.Tab("2. 📈 กราฟวิเคราะห์ความสัมพันธ์ (Analytics)"):
+        gr.Markdown("ดูความสัมพันธ์ของตัวแปรต่างๆ จากข้อมูลที่คุณเพิ่งอัปโหลดในหน้า Overview")
+        refresh_btn = gr.Button("🔄 อัปเดตกราฟจากข้อมูลล่าสุด", variant="secondary")
+        with gr.Row():
+            plot_iso = gr.Plot(label="ISO vs Sharpness")
+            plot_focal = gr.Plot(label="Focal Length vs Sharpness")
+        with gr.Row():
+            plot_shutter = gr.Plot(label="Shutter Speed vs Sharpness")
+            plot_af = gr.Plot(label="AF Point vs Sharpness")
+
+    with gr.Tab("3. 🎯 ทดสอบความคมชัดขอบเลนส์ (Lens Calibration)"):
+        gr.Markdown("อัปโหลดภาพ Focus Chart หรือภาพระนาบตรง เพื่อเปรียบเทียบความคมชัดตรงกลางและขอบภาพแบบละเอียด")
+        with gr.Row():
+            with gr.Column():
+                ft_image_input = gr.Image(label="อัปโหลดภาพทดสอบเลนส์")
+                center_roi_slider = gr.Slider(minimum=5, maximum=50, value=20, step=5, label="ขนาดพื้นที่กลางภาพ (Center ROI %)")
+                edge_roi_slider = gr.Slider(minimum=5, maximum=30, value=10, step=5, label="ขนาดพื้นที่ขอบภาพ (Edge ROI %)")
+                ft_btn = gr.Button("🔍 ประเมินความคมชัดจุดกลางและขอบ", variant="primary")
+            with gr.Column():
+                ft_image_output = gr.Image(label="ผลการวิเคราะห์ (กรอบโฟกัส)", interactive=False)
+                ft_result = gr.Textbox(label="สรุปผลการวินิจฉัยเลนส์", lines=10)
+
+    with gr.Tab("4. ⚙️ วิเคราะห์ AF Fine-tune"):
+        gr.Markdown("อัปโหลดชุดภาพที่ถ่ายแบบไล่ระดับค่า AF Fine-tune เพื่อค้นหาค่าที่ให้ความคมชัดดีที่สุด")
+        with gr.Row():
+            with gr.Column(scale=1):
+                af_files_input = gr.File(file_count="multiple", type="filepath", label="อัปโหลดรูปภาพทดสอบ AF (เช่น RAW NEF)")
+                af_analyze_btn = gr.Button("🔍 วิเคราะห์หาค่า AF ที่ดีที่สุด", variant="primary")
+                af_conclusion = gr.Textbox(label="ข้อสรุปจากการวิเคราะห์", lines=2)
+            with gr.Column(scale=2):
+                af_plot = gr.Plot(label="AF Fine-tune vs Sharpness Trend")
+
+        af_table = gr.Dataframe(interactive=False)
+
+    process_btn.click(
+        fn=process_dashboard_images,
+        inputs=[file_input],
+        outputs=[gallery, data_table, df_state]
+    )
+
+    refresh_btn.click(
+        fn=update_plots,
+        inputs=[df_state],
+        outputs=[plot_iso, plot_focal, plot_shutter, plot_af]
+    )
+
+    ft_btn.click(
+        fn=fine_tune_lens,
+        inputs=[ft_image_input, center_roi_slider, edge_roi_slider],
+        outputs=[ft_image_output, ft_result]
+    )
+
+    af_analyze_btn.click(
+        fn=analyze_af_finetune_series,
+        inputs=[af_files_input],
+        outputs=[af_plot, af_table, af_conclusion]
+    )
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    dashboard.launch(server_name="0.0.0.0", server_port=port)
