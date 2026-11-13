@@ -47,7 +47,8 @@ def process_uploaded_files(uploaded_files):
                 meta = et.get_metadata(temp_path)[0]
 
             camera = meta.get("EXIF:Model", "Unknown Camera")
-            lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens"))
+            lens = meta.get("MakerNotes:LensSpec", meta.get("EXIF:LensModel", "Unknown Lens") 
+                           if meta.get("EXIF:LensModel") else "Unknown Lens")
             iso = meta.get("EXIF:ISO", "N/A")
             aperture = meta.get("EXIF:FNumber", "N/A")
             shutter = meta.get("EXIF:ExposureTime", "N/A")
@@ -60,9 +61,8 @@ def process_uploaded_files(uploaded_files):
             roll = float(meta.get("MakerNotes:RollAngle", np.nan))
             pitch = float(meta.get("MakerNotes:PitchAngle", np.nan))
 
-            # --- RAM Optimization --- 
+            # --- RAM Optimization: Sequential Process ---
             with rawpy.imread(temp_path) as raw:
-                # ลบ fast_close_to_rgb ออกเพื่อป้องกัน Error และใช้ half_size=True แทน
                 rgb_image = raw.postprocess(half_size=True, use_camera_wb=True)
 
             gray = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY)
@@ -89,27 +89,28 @@ def process_uploaded_files(uploaded_files):
             sy, ey = max(0, cy - half_box), min(h, cy + half_box)
 
             roi = gray[sy:ey, sx:ex]
-            roi_rgb = rgb_image[sy:ey, sx:ex].copy() 
+            roi_rgb = rgb_image[sy:ey, sx:ex].copy()
 
-            score = np.var(cv2.Laplacian(roi, cv2.CV_64F)) if roi.size > 0 else 0.0
+            # Calculate Sharpness (Laplacian Var), Edge Density (Canny), Contrast (Std) -> Convert all to integers
+            score_raw = np.var(cv2.Laplacian(roi, cv2.CV_64F)) if roi.size > 0 else 0.0
+            score = int(round(score_raw))
 
             if roi.size > 0:
                 high_thresh, _ = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 canny = cv2.Canny(roi, 0.5 * high_thresh, high_thresh)
-                edge_density = (np.sum(canny > 0) / canny.size) * 100
+                edge_density_raw = (np.sum(canny > 0) / canny.size) * 100
+                edge_density = int(round(edge_density_raw))
             else:
                 canny = np.zeros((10,10))
-                edge_density = 0.0
+                edge_density = 0
 
-            contrast = np.std(roi) if roi.size > 0 else 0.0
+            contrast_raw = np.std(roi) if roi.size > 0 else 0.0
+            contrast = int(round(contrast_raw))
 
-            # ย่อขนาดรูปหลัก 25% เพื่อประหยัด RAM ในการพล็อตและส่งข้อมูล
+            # Downsample preview images to save server-client rendering memory
             preview_w = int(w * 0.25)
             preview_h = int(h * 0.25)
             rgb_resized = cv2.resize(rgb_image, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
-
-            del rgb_image, gray, roi
-            gc.collect()
 
             records.append({
                 "File Name": f_upload.name,
@@ -117,8 +118,9 @@ def process_uploaded_files(uploaded_files):
                 "Aperture (F-Stop)": aperture, "Shutter Speed": shutter, "Focal Length": focal,
                 "Focus Mode": af_mode, "AF Area Mode": af_area, "AF Fine Tune Adj": af_tune,
                 "Focus Distance (m)": focus_dist, "Roll Angle": roll, "Pitch Angle": pitch,
-                "Sharpness Score": round(score, 2), "Edge Density (%)": round(edge_density, 2),
-                "Contrast (Std Dev)": round(contrast, 2),
+                "Sharpness Score": score,
+                "Edge Density (%)": edge_density,
+                "Contrast (Std Dev)": contrast,
                 "Image Data": {
                     "rgb_resized": rgb_resized,
                     "roi_rgb": roi_rgb,
@@ -127,6 +129,11 @@ def process_uploaded_files(uploaded_files):
                     "center_scaled": (int(cx * 0.25), int(cy * 0.25))
                 }
             })
+            
+            # Clean up immediately after appending variables
+            del rgb_image, gray, roi, rgb_resized, roi_rgb, canny
+            gc.collect()
+            
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาดกับไฟล์ {f_upload.name}: {e}")
         finally:
@@ -146,14 +153,12 @@ with st.sidebar:
     if uploaded_files and len(uploaded_files) > 5:
         st.warning("⚠️ จำกัดระบบประมวลผลไว้ที่ 5 ไฟล์แรกเท่านั้นเพื่อป้องกัน RAM เต็มบน Render")
         uploaded_files = uploaded_files[:5]
-    
-    # เพิ่มปุ่มเริ่มทำงาน หลังจากอัปโหลดเสร็จสมบูรณ์
+
     analyze_button = False
     if uploaded_files:
         st.success(f"✅ อัปโหลดไฟล์สำเร็จ {len(uploaded_files)} ไฟล์ (พร้อมประมวลผล)")
         analyze_button = st.button("⚡ เริ่มทำการวิเคราะห์และประมวลผล", type="primary")
 
-# ตรวจสอบการกดปุ่มวิเคราะห์
 if uploaded_files and analyze_button:
     with st.spinner("กำลังประมวลผลและวิเคราะห์โครงสร้างภาพ... "):
         data_records = process_uploaded_files(uploaded_files)
@@ -162,7 +167,7 @@ if uploaded_files and analyze_button:
 if 'processed_data' in st.session_state and st.session_state['processed_data']:
     data_records = st.session_state['processed_data']
     df = pd.DataFrame([{k: v for k, v in r.items() if k != "Image Data"} for r in data_records])
-    
+
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗂️ 1. ข้อมูลอภิมานเชิงลึก",
         "🔍 2. ภาพจุดโฟกัส & ROI",
@@ -172,7 +177,8 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
     ])
 
     with tab1:
-        st.dataframe(df.style.highlight_max(subset=['Sharpness Score'], color='lightgreen'))
+        st.subheader("📊 ข้อมูลอภิข้อมูลของไฟล์ (สถิติเป็นจำนวนเต็ม)")
+        st.dataframe(df.style.highlight_max(subset=['Sharpness Score', 'Edge Density (%)'], color='lightgreen'))
 
     with tab2:
         selected_file = st.selectbox("เลือกภาพที่ต้องการวิเคราะห์:", df["File Name"].tolist())
@@ -200,23 +206,27 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
     with tab3:
         fig_bar, ax_bar = plt.subplots(figsize=(10, 4))
         sns.barplot(data=df, x='File Name', y='Sharpness Score', ax=ax_bar, palette='viridis')
+        for container in ax_bar.containers:
+            ax_bar.bar_label(container, fmt='%d', fontweight='bold', padding=5)
         plt.xticks(rotation=45, ha='right')
         st.pyplot(fig_bar)
         plt.close(fig_bar)
 
     with tab4:
         for r in data_records:
-            st.markdown(f"**🎯 {r['File Name']}**")
+            st.markdown(f"**🎯 {r['File Name']}** | Sharpness Score: {r['Sharpness Score']} | Edge Density: {r['Edge Density (%)']}% | Contrast: {r['Contrast (Std Dev)']}")
             col1, col2, col3 = st.columns(3)
             with col1:
                 fig, ax = plt.subplots()
                 ax.imshow(r["Image Data"]["roi_rgb"])
+                ax.set_title("Original ROI")
                 ax.axis('off')
                 st.pyplot(fig)
                 plt.close(fig)
             with col2:
                 fig2, ax2 = plt.subplots()
                 ax2.imshow(r["Image Data"]["canny"], cmap='gray')
+                ax2.set_title(f"Canny Edges (Density: {r['Edge Density (%)']}%)")
                 ax2.axis('off')
                 st.pyplot(fig2)
                 plt.close(fig2)
@@ -225,6 +235,7 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
                 for j, col in enumerate(('r', 'g', 'b')):
                     hist = cv2.calcHist([r["Image Data"]["roi_rgb"]], [j], None, [256], [0, 256])
                     ax3.plot(hist, color=col, alpha=0.8)
+                ax3.set_title(f"Color Histogram (Contrast {r['Contrast (Std Dev)']})")
                 st.pyplot(fig3)
                 plt.close(fig3)
             st.divider()
@@ -234,12 +245,14 @@ if 'processed_data' in st.session_state and st.session_state['processed_data']:
         with col1:
             fig, ax = plt.subplots()
             sns.regplot(data=df, x='Edge Density (%)', y='Sharpness Score', ax=ax)
+            ax.set_title("Sharpness vs Edge Density")
             st.pyplot(fig)
             plt.close(fig)
         with col2:
             fig2, ax2 = plt.subplots()
             if not df['Roll Angle'].isnull().all():
                 sns.regplot(data=df, x='Roll Angle', y='Sharpness Score', ax=ax2)
+                ax2.set_title("Sharpness vs Roll Angle")
             else:
                 ax2.text(0.5, 0.5, "No Roll Angle Data Available", ha='center', va='center')
             st.pyplot(fig2)
