@@ -27,6 +27,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ฐานข้อมูลแบรนด์และรุ่นกล้องที่รองรับตามข้อกำหนด
+SUPPORTED_BRANDS = ["Nikon", "Canon", "Sigma", "Tamron", "Samyang", "Tokina"]
+
 def parse_float(val) -> Optional[float]:
     if val is None:
         return None
@@ -64,12 +67,12 @@ def is_hex_or_raw(s: str) -> bool:
 def format_brand_casing(name: str) -> str:
     if not name:
         return ""
-    name = re.sub(r'^\bNIKON\b', 'Nikon', name, flags=re.IGNORECASE)
-    name = re.sub(r'^\bCANON\b', 'Canon', name, flags=re.IGNORECASE)
-    name = re.sub(r'^\bSONY\b', 'Sony', name, flags=re.IGNORECASE)
-    name = re.sub(r'^\bSIGMA\b', 'Sigma', name, flags=re.IGNORECASE)
-    name = re.sub(r'^\bTAMRON\b', 'Tamron', name, flags=re.IGNORECASE)
-    return name
+    name_upper = name.upper()
+    for brand in SUPPORTED_BRANDS:
+        if brand.upper() in name_upper:
+            pattern = re.compile(re.escape(brand), re.IGNORECASE)
+            name = pattern.sub(brand, name)
+    return name.strip()
 
 def get_accurate_camera_name(metadata: dict) -> str:
     make = metadata.get("EXIF:Make") or metadata.get("Make") or metadata.get("MakerNotes:Make") or ""
@@ -126,7 +129,7 @@ def get_accurate_lens_name(metadata: dict) -> str:
                     if focal_val > max_f * 1.15 or focal_val < min_f * 0.85:
                         continue 
 
-            lens_name = re.sub(r'(?i)\s*(NIKON|CANON)\s+(CORPORATION|INC\.?)\s*', r' ', cand_str).strip()
+            lens_name = format_brand_casing(re.sub(r'(?i)\s*(CORPORATION|INC\.?)\s*', r' ', cand_str))
             break
 
     if lens_name:
