@@ -3,21 +3,42 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.0</title>
+  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.1</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
 /* Precompiled Tailwind Utility Styles (Production-Ready, Zero Console Warning) */
 *, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: #e2e8f0; }
-body { margin: 0; line-height: 1.5; font-family: 'Sarabun', sans-serif; background-color: #f8fafc; color: #1e293b; }
+body { margin: 0; line-height: 1.5; font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #1e293b; }
 h1, h2, h3, p, pre { margin: 0; }
 button, input, select { font-family: inherit; font-size: 100%; color: inherit; }
 button { background-color: transparent; background-image: none; }
 img, canvas { display: block; max-width: 100%; }
 table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
-.crop-zoom-container { overflow: auto; max-height: 70vh; }
+.crop-zoom-container { overflow: auto; max-height: 55vh; }
 .crop-zoom-img { transition: transform 0.2s ease; transform-origin: top left; }
 .menu-tab { transition: all 0.18s ease; }
 .menu-tab.active { background-color: #4f46e5; color: #ffffff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25); }
 .menu-tab:not(.active):hover { background-color: #eef2ff; color: #4338ca; }
+.crop-stage { position: relative; display: inline-block; user-select: none; touch-action: none; cursor: crosshair; }
+.crop-selection-box {
+  position: absolute;
+  border: 2px solid #10b981;
+  background: rgba(16, 185, 129, 0.16);
+  box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.45);
+  pointer-events: none;
+}
+.crop-selection-label {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  background: #059669;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
 .absolute { position: absolute; }
 .align-top { vertical-align: top; }
 .antialiased { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -35,6 +56,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .bg-emerald-50\/70 { background-color: rgba(236, 253, 245, 0.7); }
 .bg-emerald-500 { background-color: #10b981; }
 .bg-emerald-600 { background-color: #059669; }
+.bg-indigo-100 { background-color: #e0e7ff; }
 .bg-indigo-50 { background-color: #eef2ff; }
 .bg-indigo-50\/40 { background-color: rgba(238, 242, 255, 0.4); }
 .bg-indigo-50\/70 { background-color: rgba(238, 242, 255, 0.7); }
@@ -49,6 +71,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .bg-slate-50 { background-color: #f8fafc; }
 .bg-slate-50\/50 { background-color: rgba(248, 250, 252, 0.5); }
 .bg-slate-50\/70 { background-color: rgba(248, 250, 252, 0.7); }
+.bg-slate-700 { background-color: #334155; }
 .bg-slate-800 { background-color: #1e293b; }
 .bg-slate-900 { background-color: #0f172a; }
 .bg-slate-900\/75 { background-color: rgba(15, 23, 42, 0.75); }
@@ -71,6 +94,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .border-emerald-500 { border-color: #10b981; }
 .border-emerald-500\/40 { border-color: rgba(16, 185, 129, 0.4); }
 .border-indigo-200 { border-color: #c7d2fe; }
+.border-indigo-300 { border-color: #a5b4fc; }
 .border-indigo-500 { border-color: #6366f1; }
 .border-purple-200 { border-color: #e9d5ff; }
 .border-rose-200 { border-color: #fecdd3; }
@@ -83,6 +107,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .border-slate-800 { border-color: #1e293b; }
 .border-t { border-top-width: 1px; border-top-style: solid; }
 .bottom-1 { bottom: 0.25rem; }
+.bottom-1\.5 { bottom: 0.375rem; }
 .cursor-pointer { cursor: pointer; }
 .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: #e2e8f0; }
 .divide-y > :not([hidden]) ~ :not([hidden]) { border-top-width: 1px; border-top-style: solid; }
@@ -113,17 +138,21 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .group:hover .group-hover\:scale-105 { transform: scale(1.05); }
 .h-1\.5 { height: 0.375rem; }
-.h-14 { height: 3.5rem; }
-.h-16 { height: 4rem; }
 .h-2\.5 { height: 0.625rem; }
-.h-20 { height: 5rem; }
-.h-48 { height: 12rem; }
+.h-24 { height: 6rem; }
+.h-28 { height: 7rem; }
+.h-32 { height: 8rem; }
+.h-52 { height: 13rem; }
+.h-60 { height: 15rem; }
 .h-64 { height: 16rem; }
 .h-72 { height: 18rem; }
 .hidden { display: none; }
+.hover\:bg-emerald-100:hover { background-color: #d1fae5; }
 .hover\:bg-emerald-700:hover { background-color: #047857; }
+.hover\:bg-indigo-100:hover { background-color: #e0e7ff; }
 .hover\:bg-indigo-700:hover { background-color: #4338ca; }
 .hover\:bg-rose-50:hover { background-color: #fff1f2; }
+.hover\:bg-slate-200:hover { background-color: #e2e8f0; }
 .hover\:bg-slate-50:hover { background-color: #f8fafc; }
 .hover\:bg-slate-50\/80:hover { background-color: rgba(248, 250, 252, 0.8); }
 .hover\:bg-slate-900:hover { background-color: #0f172a; }
@@ -143,10 +172,11 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .justify-center { justify-content: center; }
 .leading-none { line-height: 1; }
 .leading-relaxed { line-height: 1.625; }
+.left-1\.5 { left: 0.375rem; }
 .max-h-64 { max-height: 16rem; }
-.max-h-\[320px\] { max-height: 320px; }
+.max-h-\[340px\] { max-height: 340px; }
 .max-h-\[92vh\] { max-height: 92vh; }
-.max-w-5xl { max-width: 64rem; }
+.max-w-6xl { max-width: 72rem; }
 .max-w-7xl { max-width: 80rem; }
 .max-w-full { max-width: 100%; }
 .mb-0\.5 { margin-bottom: 0.125rem; }
@@ -157,12 +187,13 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .mb-5 { margin-bottom: 1.25rem; }
 .mb-6 { margin-bottom: 1.5rem; }
 .min-h-\[240px\] { min-height: 240px; }
-.min-h-\[280px\] { min-height: 280px; }
+.min-h-\[260px\] { min-height: 260px; }
 .min-w-\[230px\] { min-width: 230px; }
 .mt-0\.5 { margin-top: 0.125rem; }
 .mt-1 { margin-top: 0.25rem; }
 .mt-1\.5 { margin-top: 0.375rem; }
 .mt-2 { margin-top: 0.5rem; }
+.mt-3 { margin-top: 0.75rem; }
 .mt-4 { margin-top: 1rem; }
 .mx-auto { margin-left: auto; margin-right: auto; }
 .object-contain { object-fit: contain; }
@@ -203,6 +234,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
 .relative { position: relative; }
 .right-1 { right: 0.25rem; }
+.right-1\.5 { right: 0.375rem; }
 .rounded { border-radius: 0.25rem; }
 .rounded-2xl { border-radius: 1rem; }
 .rounded-full { border-radius: 9999px; }
@@ -258,14 +290,16 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .text-white { color: #ffffff; }
 .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
 .text-xs { font-size: 0.75rem; line-height: 1rem; }
+.top-1\.5 { top: 0.375rem; }
 .tracking-wider { letter-spacing: 0.05em; }
 .transition { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
 .uppercase { text-transform: uppercase; }
-.w-14 { width: 3.5rem; }
-.w-16 { width: 4rem; }
 .w-2\.5 { width: 0.625rem; }
-.w-20 { width: 5rem; }
-.w-48 { width: 12rem; }
+.w-24 { width: 6rem; }
+.w-28 { width: 7rem; }
+.w-32 { width: 8rem; }
+.w-36 { width: 9rem; }
+.w-60 { width: 15rem; }
 .w-auto { width: auto; }
 .w-full { width: 100%; }
 .z-50 { z-index: 50; }
@@ -299,15 +333,15 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
             <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
               <span>🔬</span> ระบบวิเคราะห์ความคมชัดเชิงแสง &amp; ประเมินคุณภาพภาพถ่าย (Optical AF &amp; Quality Analytics)
             </h1>
-            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">v2.0 Multi-Menu</span>
+            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">v2.1 High-Res &amp; Safe-RAM</span>
           </div>
           <p class="text-sm text-slate-500 mt-1">
-            สกัดข้อมูล EXIF / AF Fine-tune จริงจากไฟล์ RAW (.NEF, .CR2, .CR3, .ARW, .DNG) และ JPG พร้อมระบบจัดเกรดคุณภาพ วิเคราะห์ Edge/Histogram และสถิติเชิงลึก
+            สกัดข้อมูล EXIF / AF Fine-tune จริงจากไฟล์ RAW (.NEF, .CR2, .CR3, .ARW, .DNG) และ JPG พร้อมระบบเลือกครอปภาพตัวอย่างความละเอียดสูงและจัดเกรดอัตโนมัติ
           </p>
         </div>
         <div class="flex items-center gap-2.5 shrink-0">
           <button id="clearAllBtn" onclick="clearAllResults()" class="hidden cursor-pointer inline-flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-semibold px-4 py-3 rounded-xl border border-slate-200 transition text-sm">
-            <span>🗑️ ล้างข้อมูล</span>
+            <span>🗑️ ล้างข้อมูล (<span id="sessionCountBadge">0</span>/20)</span>
           </button>
           <label class="cursor-pointer inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-3 rounded-xl shadow-sm transition">
             <span>📁 เลือกไฟล์ภาพเพื่อตรวจสอบ</span>
@@ -316,34 +350,51 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
         </div>
       </div>
 
-      <!-- Dropzone -->
+      <!-- Dropzone + Memory Safe Limits Info -->
       <div id="dropZone" class="mt-4 border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-5 text-center transition bg-slate-50/70 cursor-pointer">
         <p class="text-slate-600 font-medium">ลากไฟล์ภาพมาวางที่นี่ หรือคลิกเพื่อเลือกหลายไฟล์พร้อมกัน (ข้อมูลจะซิงก์เข้าสู่ทุกเมนูอัตโนมัติ)</p>
         <p class="text-xs text-slate-400 mt-1">รองรับ Nikon, Canon, Sony, Fujifilm, Sigma, Tamron, Samyang, Tokina (.NEF, .CR2, .CR3, .ARW, .DNG, .JPG)</p>
+        <div class="mt-3 flex flex-wrap items-center justify-center gap-2 text-[11px]">
+          <span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200">
+            📦 แนะนำอัปโหลดครั้งละไม่เกิน 10 ไฟล์
+          </span>
+          <span class="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+            💾 ขนาดสูงสุด 60 MB / ไฟล์
+          </span>
+          <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+            🧠 เก็บในเซสชันสูงสุด 20 ไฟล์ (ประมวลผลเรียงทีละไฟล์เพื่อป้องกันหน่วยความจำเต็ม)
+          </span>
+        </div>
+      </div>
+
+      <!-- Upload Limit / Memory Guard Notification Banner -->
+      <div id="uploadNoticeBanner" class="hidden mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 flex items-start justify-between gap-3">
+        <div id="uploadNoticeText" class="leading-relaxed font-medium"></div>
+        <button onclick="document.getElementById('uploadNoticeBanner').classList.add('hidden')" class="text-amber-700 hover:text-slate-900 font-bold text-base leading-none px-1 cursor-pointer">&times;</button>
       </div>
     </div>
 
     <!-- Navigation Menu Bar -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-2 mb-6 flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-wrap items-center gap-1.5" role="tablist">
-        <button id="tabBtn-menu1" onclick="switchMenu('menu1')" class="menu-tab active px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2">
+        <button id="tabBtn-menu1" onclick="switchMenu('menu1')" class="menu-tab active px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 cursor-pointer">
           <span>🔬</span>
           <span>1. สอบเทียบจุดโฟกัส &amp; ความคมชัด</span>
         </button>
-        <button id="tabBtn-menu2" onclick="switchMenu('menu2')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+        <button id="tabBtn-menu2" onclick="switchMenu('menu2')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2 cursor-pointer">
           <span>🏆</span>
           <span>2. ประเมินคุณภาพ &amp; จัดเกรดภาพ</span>
           <span id="badgeMenu2" class="hidden text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">0</span>
         </button>
-        <button id="tabBtn-menu3" onclick="switchMenu('menu3')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+        <button id="tabBtn-menu3" onclick="switchMenu('menu3')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2 cursor-pointer">
           <span>📐</span>
           <span>3. เส้นขอบ (Edge) &amp; ฮิสโตแกรม</span>
         </button>
-        <button id="tabBtn-menu4" onclick="switchMenu('menu4')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+        <button id="tabBtn-menu4" onclick="switchMenu('menu4')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2 cursor-pointer">
           <span>📈</span>
           <span>4. สถิติเปรียบเทียบ &amp; MakerNotes</span>
         </button>
-        <button id="tabBtn-menu5" onclick="switchMenu('menu5')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+        <button id="tabBtn-menu5" onclick="switchMenu('menu5')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2 cursor-pointer">
           <span>🔌</span>
           <span>5. API / JSON</span>
         </button>
@@ -354,7 +405,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
     </div>
 
     <!-- ===================================================================== -->
-    <!-- เมนูที่ 1: ระบบเดิม (Optical AF Calibration & Peak Sharpness Comparison) -->
+    <!-- เมนูที่ 1: ระบบหลัก (Optical AF Calibration & Custom Crop Selector)     -->
     <!-- ===================================================================== -->
     <section id="section-menu1" class="menu-section">
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -362,23 +413,23 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
           <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
             <span>📊</span> รายงานสรุปผลวิเคราะห์พารามิเตอร์และความคมชัดเชิงแสง (เมนูหลัก)
           </h2>
-          <span class="text-xs text-slate-500">คลิกที่ภาพ Crop เพื่อขยายตรวจสอบรายละเอียด 100%–200%</span>
+          <span class="text-xs text-slate-500">คลิกที่ภาพตัวอย่างเพื่อขยาย 100%–200% หรือกดปุ่ม <strong>"✂️ เลือกครอปส่วนภาพ"</strong> เพื่อกำหนดภาพตัวอย่างในตาราง</span>
         </div>
 
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                <th class="py-3.5 px-5">ภาพขนาดย่อ &amp; ชื่อไฟล์</th>
+                <th class="py-3.5 px-5">ภาพตัวอย่างความละเอียดสูง &amp; ชื่อไฟล์</th>
                 <th class="py-3.5 px-5">การตั้งค่ากล้อง (EXIF)</th>
                 <th class="py-3.5 px-5">ความคมชัด &amp; เทียบพิกัดจุดโฟกัส</th>
-                <th class="py-3.5 px-5 text-center">ส่วนที่ชัดที่สุด (Crop) &amp; พิกัด</th>
+                <th class="py-3.5 px-5 text-center">ภาพครอปตัวอย่าง &amp; เลือกส่วนภาพ</th>
               </tr>
             </thead>
             <tbody id="resultsBody" class="divide-y divide-slate-200 text-sm">
               <tr id="emptyRow">
                 <td colspan="4" class="py-12 text-center text-slate-400">
-                  ยังไม่มีรายการไฟล์ กรุณาอัปโหลดไฟล์ภาพเพื่อเริ่มการวิเคราะห์
+                  ยังไม่มีรายการไฟล์ กรุณาอัปโหลดไฟล์ภาพเพื่อเริ่มการวิเคราะห์ (สูงสุด 10 ไฟล์/ครั้ง)
                 </td>
               </tr>
             </tbody>
@@ -391,7 +442,6 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
     <!-- เมนูที่ 2: ระบบประเมินและจัดเกรดคุณภาพภาพถ่าย (Photo Quality Scoring)   -->
     <!-- ===================================================================== -->
     <section id="section-menu2" class="menu-section hidden space-y-6">
-      <!-- Summary KPI Cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
           <div class="text-xs font-semibold text-slate-400 uppercase">ภาพที่ประเมินทั้งหมด</div>
@@ -415,7 +465,6 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
         </div>
       </div>
 
-      <!-- Quality Scoring Table & Filter -->
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
           <div>
@@ -434,7 +483,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
               <option value="C">เฉพาะ Grade C (ปานกลาง 50–69.9)</option>
               <option value="D">เฉพาะ Reject / Grade D (&lt; 50)</option>
             </select>
-            <button onclick="exportQualityCSV()" class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-sm transition">
+            <button onclick="exportQualityCSV()" class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-sm transition cursor-pointer">
               <span>📥 ส่งออกรายงาน CSV</span>
             </button>
           </div>
@@ -472,7 +521,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
             <span>📐</span> วิเคราะห์โครงสร้างเส้นขอบ (Canny Edge Map) และการกระจายแสง (RGB Histogram)
           </h2>
           <p class="text-xs text-slate-500 mt-0.5">
-            ตรวจสอบรายละเอียดพื้นผิวบริเวณจุดโฟกัส (ROI) แยกความคมชัดจริงออกจาก Noise พร้อมตรวจจับอาการแสงจ้าทะลุ (Highlight Clipping) และมืดจม (Shadow Crushing)
+            ตรวจสอบรายละเอียดพื้นผิวบริเวณจุดโฟกัส (ROI ความละเอียดสูง 560×560px) พร้อมกราฟการกระจายแสง 3 ช่องสี
           </p>
         </div>
       </div>
@@ -498,15 +547,15 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
           <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h3 class="text-base font-bold text-slate-800 mb-1">🔬 เปรียบเทียบความคมชัดรายภาพ (AF Sharpness vs Peak Sharpness)</h3>
             <p class="text-xs text-slate-500 mb-4">เปรียบเทียบค่า Laplacian Variance ณ จุดโฟกัสกล้องกับจุดที่คมชัดที่สุดในเฟรม</p>
-            <div class="h-72">
+            <div class="h-72 relative">
               <canvas id="chartPerImageSharpness"></canvas>
             </div>
           </div>
 
           <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h3 class="text-base font-bold text-slate-800 mb-1">📊 ค่าเฉลี่ยความคมชัดและคะแนนคุณภาพจำแนกตามกลุ่ม ISO</h3>
-            <p class="text-xs text-slate-500 mb-4">จัดกลุ่มตามค่าความไวแสง (ISO Group Analysis) ตามหลักการวิเคราะห์จากสมุดโน้ตบุ๊ก</p>
-            <div class="h-72">
+            <p class="text-xs text-slate-500 mb-4">จัดกลุ่มตามค่าความไวแสง (ISO Group Analysis)</p>
+            <div class="h-72 relative">
               <canvas id="chartIsoGroup"></canvas>
             </div>
           </div>
@@ -517,7 +566,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
           <div class="lg:col-span-6 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h3 class="text-base font-bold text-slate-800 mb-1">📈 ความสัมพันธ์ระหว่าง Edge Density (%) กับ AF Sharpness</h3>
             <p class="text-xs text-slate-500 mb-4">ช่วยแยกแยะภาพที่มีรายละเอียดเส้นขอบคมชัดจริง ออกจากภาพที่ Sharpness สูงเพราะ Grain/Noise</p>
-            <div class="h-64">
+            <div class="h-64 relative">
               <canvas id="chartEdgeScatter"></canvas>
             </div>
           </div>
@@ -583,7 +632,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
               สามารถส่งไฟล์ภาพเข้าสู่ Endpoint <code class="bg-slate-100 px-1.5 py-0.5 rounded text-indigo-700 font-mono">POST /api/v1/quality-evaluate</code> เพื่อรับผลประเมินคุณภาพแบบ JSON ได้ทันที
             </p>
           </div>
-          <button onclick="copyLatestJson()" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-sm transition">
+          <button onclick="copyLatestJson()" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-sm transition cursor-pointer">
             <span>📋 คัดลอก JSON ล่าสุด</span>
           </button>
         </div>
@@ -614,72 +663,111 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     </section>
   </div>
 
-  <!-- Modal สำหรับดูรายละเอียดส่วนที่ชัดที่สุด และเปรียบเทียบพิกัด (คงเดิมจากเวอร์ชัน 1) -->
+  <!-- ===================================================================== -->
+  <!-- Modal ตรวจสอบภาพขยาย 100%-200% และเครื่องมือเลือกครอปส่วนภาพลงตาราง     -->
+  <!-- ===================================================================== -->
   <div id="detailModal" class="fixed inset-0 z-50 hidden bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[92vh] flex flex-col overflow-hidden">
       <!-- Modal Header -->
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div>
-          <h3 id="modalTitle" class="text-lg font-bold text-slate-900">รายละเอียดส่วนที่คมชัดที่สุด &amp; พิกัดจุดโฟกัส</h3>
+          <h3 id="modalTitle" class="text-lg font-bold text-slate-900">รายละเอียดส่วนที่คมชัดที่สุด &amp; เครื่องมือเลือกครอปภาพตัวอย่าง</h3>
           <p id="modalSubtitle" class="text-xs text-slate-500 mt-0.5"></p>
         </div>
-        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-2xl font-bold leading-none px-2">&times;</button>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-2xl font-bold leading-none px-2 cursor-pointer">&times;</button>
       </div>
 
       <!-- Modal Body -->
       <div class="p-6 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <!-- Left: Sharpest Crop 100% Detail -->
+        <!-- Left: High-Res Crop Preview & Apply to Table -->
         <div class="lg:col-span-6 flex flex-col">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm font-bold text-emerald-700 flex items-center gap-1.5">
-              <span>🔍</span> ภาพครอบส่วนที่คมชัดที่สุด (100% Full-Res Crop)
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span id="modalCropModeLabel" class="text-sm font-bold text-emerald-700 flex items-center gap-1.5">
+              <span>🔍</span> ภาพครอปความละเอียดสูง (100% Full-Res Crop)
             </span>
             <div class="flex items-center gap-1 bg-slate-100 rounded-lg p-1 text-xs">
-              <button onclick="setCropZoom(1)" class="zoom-btn px-2 py-1 rounded font-semibold bg-white shadow-sm text-indigo-600" data-zoom="1">100%</button>
-              <button onclick="setCropZoom(1.5)" class="zoom-btn px-2 py-1 rounded font-semibold text-slate-600" data-zoom="1.5">150%</button>
-              <button onclick="setCropZoom(2)" class="zoom-btn px-2 py-1 rounded font-semibold text-slate-600" data-zoom="2">200%</button>
+              <button onclick="setCropZoom(1)" class="zoom-btn px-2 py-1 rounded font-semibold bg-white shadow-sm text-indigo-600 cursor-pointer" data-zoom="1">100%</button>
+              <button onclick="setCropZoom(1.5)" class="zoom-btn px-2 py-1 rounded font-semibold text-slate-600 cursor-pointer" data-zoom="1.5">150%</button>
+              <button onclick="setCropZoom(2)" class="zoom-btn px-2 py-1 rounded font-semibold text-slate-600 cursor-pointer" data-zoom="2">200%</button>
             </div>
           </div>
-          <div class="crop-zoom-container border-2 border-emerald-500/40 rounded-xl bg-slate-950 flex items-center justify-center min-h-[280px]">
+
+          <div class="crop-zoom-container border-2 border-emerald-500/40 rounded-xl bg-slate-950 flex items-center justify-center min-h-[260px]">
             <img id="modalCropImg" src="" alt="Sharpest Crop Detail" class="crop-zoom-img max-w-full object-contain" />
           </div>
-          <p class="text-xs text-slate-500 mt-2">
-            * ภาพตัดเฉพาะจุดที่มีค่าคอนทราสต์เชิงแสงสูงสุดจากไฟล์ต้นฉบับ (ไม่ซ้อนทับเส้นกรอบ) เพื่อตรวจสอบรายละเอียดเนื้อภาพจริง
-          </p>
-        </div>
 
-        <!-- Right: Full Frame Comparison & Metrics -->
-        <div class="lg:col-span-6 flex flex-col">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm font-bold text-slate-800">🎯 ตำแหน่งเปรียบเทียบในเฟรมภาพ</span>
-            <div class="flex items-center gap-3 text-xs">
-              <span class="inline-flex items-center gap-1 text-blue-600 font-semibold"><span class="w-2.5 h-2.5 inline-block bg-blue-600 rounded-xs"></span> จุดโฟกัสกล้อง</span>
-              <span class="inline-flex items-center gap-1 text-emerald-600 font-semibold"><span class="w-2.5 h-2.5 inline-block bg-emerald-500 rounded-xs"></span> จุดชัดที่สุด</span>
+          <!-- Live Sharpness & Action Bar for Selected Crop -->
+          <div class="mt-3 bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="text-xs text-emerald-800">
+              <div><strong>พื้นที่แสดงตัวอย่าง:</strong> <span id="modalCropInfoText">จุดที่คมชัดที่สุด (อัตโนมัติ)</span></div>
+              <div class="mt-0.5 text-[11px] text-emerald-700" id="modalCropSharpnessInfo">ค่าความคมชัดบริเวณนี้: -</div>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button onclick="applySelectedCropToTable()" id="applyCropBtn"
+                      class="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-sm transition cursor-pointer">
+                <span>✅ ใช้ภาพครอปนี้เป็นตัวอย่างในตาราง</span>
+              </button>
+              <button onclick="downloadCurrentCrop()"
+                      class="inline-flex items-center gap-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-semibold px-2.5 py-2 rounded-lg transition cursor-pointer">
+                <span>💾 บันทึกภาพ</span>
+              </button>
             </div>
           </div>
-          <div class="rounded-xl bg-slate-950 overflow-hidden border border-slate-200 flex items-center justify-center min-h-[240px]">
-            <img id="modalFullImg" src="" alt="Annotated Full Frame" class="max-h-[320px] w-auto object-contain" />
+        </div>
+
+        <!-- Right: Interactive Drag-to-Crop Frame Selector & Metrics -->
+        <div class="lg:col-span-6 flex flex-col">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span class="text-sm font-bold text-slate-800">✂️ คลิกหรือลากกรอบบนภาพเพื่อเลือกครอปส่วนที่ต้องการ</span>
+            <div class="flex items-center gap-1 text-[11px]">
+              <button onclick="selectPresetCrop('peak')" class="px-2 py-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold border border-emerald-200 cursor-pointer">จุดชัดสุด</button>
+              <button onclick="selectPresetCrop('af')" class="px-2 py-1 rounded bg-sky-50 hover:bg-sky-100 text-sky-700 font-semibold border border-sky-200 cursor-pointer">จุดโฟกัสกล้อง</button>
+              <button onclick="selectPresetCrop('center')" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer">กึ่งกลางภาพ</button>
+            </div>
+          </div>
+
+          <!-- Toggle Overlay Lines on Source Image -->
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2 text-xs">
+            <label class="inline-flex items-center gap-1.5 text-slate-600 cursor-pointer">
+              <input type="checkbox" id="toggleOverlayCheckbox" onchange="toggleCropSourceOverlay()" />
+              <span>แสดงเส้นกรอบพิกัด AF / Peak บนภาพต้นฉบับ</span>
+            </label>
+            <div class="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <span>ขนาดกรอบ:</span>
+              <button onclick="setCropBoxRatio(0.16)" class="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold cursor-pointer">เล็ก</button>
+              <button onclick="setCropBoxRatio(0.25)" class="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold cursor-pointer">กลาง</button>
+              <button onclick="setCropBoxRatio(0.36)" class="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold cursor-pointer">กว้าง</button>
+            </div>
+          </div>
+
+          <div class="rounded-xl bg-slate-950 overflow-hidden border border-slate-200 flex items-center justify-center min-h-[240px] p-2">
+            <div id="cropStage" class="crop-stage">
+              <img id="modalFullImg" src="" alt="Interactive Frame" class="max-h-[340px] w-auto object-contain block" draggable="false" />
+              <div id="cropSelectionBox" class="crop-selection-box hidden">
+                <span id="cropSelectionLabel" class="crop-selection-label">พื้นที่เลือก</span>
+              </div>
+            </div>
           </div>
 
           <!-- Comparison Box -->
-          <div class="mt-4 bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-sm">
+          <div class="mt-3 bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-2 text-sm">
             <div class="grid grid-cols-2 gap-3">
-              <div class="bg-white p-3 rounded-lg border border-blue-100">
+              <div class="bg-white p-2.5 rounded-lg border border-blue-100">
                 <div class="text-xs text-slate-500">ความคมชัด ณ จุดโฟกัสกล้อง</div>
                 <div id="modalAfSharpness" class="text-xl font-bold text-blue-600 mt-0.5">-</div>
                 <div id="modalAfCoords" class="text-xs text-slate-400 mt-0.5">-</div>
               </div>
-              <div class="bg-white p-3 rounded-lg border border-emerald-100">
+              <div class="bg-white p-2.5 rounded-lg border border-emerald-100">
                 <div class="text-xs text-slate-500">ความคมชัด ณ จุดที่ชัดที่สุด</div>
                 <div id="modalPeakSharpness" class="text-xl font-bold text-emerald-600 mt-0.5">-</div>
                 <div id="modalPeakCoords" class="text-xs text-slate-400 mt-0.5">-</div>
               </div>
             </div>
-            <div class="pt-2 border-t border-slate-200 flex flex-wrap justify-between gap-2 text-xs">
+            <div class="pt-1.5 border-t border-slate-200 flex flex-wrap justify-between gap-2 text-xs">
               <span><strong>ระยะคลาดเคลื่อน:</strong> <span id="modalOffset" class="text-indigo-700 font-semibold">-</span></span>
-              <span><strong>AF Fine-tune (ในไฟล์):</strong> <span id="modalAfTune" class="text-purple-700 font-semibold">-</span></span>
+              <span><strong>AF Fine-tune:</strong> <span id="modalAfTune" class="text-purple-700 font-semibold">-</span></span>
             </div>
-            <div id="modalAdvice" class="text-xs text-slate-600 bg-emerald-50/70 border border-emerald-200/70 rounded-lg p-2.5 mt-2"></div>
+            <div id="modalAdvice" class="text-xs text-slate-600 bg-white border border-slate-200 rounded-lg p-2"></div>
           </div>
         </div>
       </div>
@@ -687,6 +775,14 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
   </div>
 
   <script>
+    // =========================================================================
+    // ขีดจำกัดเพื่อป้องกันหน่วยความจำเต็มและรักษาเสถียรภาพของระบบ (Safe-RAM Limits)
+    // =========================================================================
+    const MAX_BATCH_FILES = 10;       // จำกัดการอัปโหลดสูงสุด 10 ไฟล์ต่อครั้ง
+    const MAX_SESSION_FILES = 20;     // เก็บผลวิเคราะห์ในเซสชันสูงสุด 20 ไฟล์
+    const MAX_FILE_SIZE_MB = 60;      // ขนาดไฟล์สูงสุด 60 MB ต่อไฟล์
+    const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
     const fileInput = document.getElementById('fileInput');
     const dropZone = document.getElementById('dropZone');
     const resultsBody = document.getElementById('resultsBody');
@@ -698,6 +794,57 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     let chartIso = null;
     let chartScatter = null;
     let activeMenu = 'menu1';
+
+    // State สำหรับ Interactive Cropper ใน Modal
+    let currentModalRowId = null;
+    let currentCropPreset = 'peak'; // 'peak' | 'af' | 'custom'
+    let pendingCustomCrop = null;   // { dataUrl, label, coordsText, sharpness }
+    let cropBoxRatio = 0.24;
+    let isDraggingCrop = false;
+    let dragStartPos = { x: 0, y: 0 };
+    let cleanSourceImgObj = null;
+
+    function showUploadNotice(messageHtml) {
+      const banner = document.getElementById('uploadNoticeBanner');
+      const textEl = document.getElementById('uploadNoticeText');
+      textEl.innerHTML = messageHtml;
+      banner.classList.remove('hidden');
+    }
+
+    function updateSessionCountUI() {
+      const count = analyzedOrder.length;
+      const clearBtn = document.getElementById('clearAllBtn');
+      const countBadge = document.getElementById('sessionCountBadge');
+      const badge2 = document.getElementById('badgeMenu2');
+      if (count > 0) {
+        clearBtn.classList.remove('hidden');
+        countBadge.textContent = count;
+        badge2.textContent = count;
+        badge2.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+        badge2.classList.add('hidden');
+      }
+    }
+
+    function enforceSessionMemoryLimit() {
+      let evictedCount = 0;
+      while (analyzedOrder.length > MAX_SESSION_FILES) {
+        const oldestId = analyzedOrder.pop();
+        if (oldestId) {
+          if (histCharts[oldestId]) {
+            try { histCharts[oldestId].destroy(); } catch (e) {}
+            delete histCharts[oldestId];
+          }
+          delete analyzedStore[oldestId];
+          const oldRow = document.getElementById(oldestId);
+          if (oldRow) oldRow.remove();
+          evictedCount++;
+        }
+      }
+      updateSessionCountUI();
+      return evictedCount;
+    }
 
     function switchMenu(menuId) {
       activeMenu = menuId;
@@ -736,20 +883,23 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     });
     fileInput.addEventListener('change', (e) => {
       if (e.target.files.length) handleFiles(e.target.files);
+      fileInput.value = '';
     });
 
     function clearAllResults() {
+      Object.values(histCharts).forEach(ch => { try { ch.destroy(); } catch (e) {} });
+      Object.keys(histCharts).forEach(k => delete histCharts[k]);
       Object.keys(analyzedStore).forEach(k => delete analyzedStore[k]);
       analyzedOrder.length = 0;
       resultsBody.innerHTML = `
         <tr id="emptyRow">
           <td colspan="4" class="py-12 text-center text-slate-400">
-            ยังไม่มีรายการไฟล์ กรุณาอัปโหลดไฟล์ภาพเพื่อเริ่มการวิเคราะห์
+            ยังไม่มีรายการไฟล์ กรุณาอัปโหลดไฟล์ภาพเพื่อเริ่มการวิเคราะห์ (สูงสุด 10 ไฟล์/ครั้ง)
           </td>
         </tr>
       `;
-      document.getElementById('clearAllBtn').classList.add('hidden');
-      document.getElementById('badgeMenu2').classList.add('hidden');
+      document.getElementById('uploadNoticeBanner').classList.add('hidden');
+      updateSessionCountUI();
       progressText.textContent = 'พร้อมใช้งาน';
       renderMenu2();
       renderMenu3();
@@ -758,7 +908,18 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     }
 
     async function handleFiles(fileList) {
-      const files = Array.from(fileList);
+      let files = Array.from(fileList);
+      const notices = [];
+
+      // 1. จำกัดจำนวนไฟล์ต่อครั้งไม่เกิน MAX_BATCH_FILES (10 ไฟล์)
+      if (files.length > MAX_BATCH_FILES) {
+        const skipped = files.length - MAX_BATCH_FILES;
+        files = files.slice(0, MAX_BATCH_FILES);
+        notices.push(
+          `⚠️ คุณเลือกไฟล์ทั้งหมด <strong>${fileList.length} ไฟล์</strong> ระบบจำกัดการอัปโหลดไว้ที่ <strong>${MAX_BATCH_FILES} ไฟล์/ครั้ง</strong> เพื่อป้องกันหน่วยความจำเต็ม (ระบบจะประมวลผล ${MAX_BATCH_FILES} ไฟล์แรก และข้ามอีก ${skipped} ไฟล์)`
+        );
+      }
+
       const emptyRow = document.getElementById('emptyRow');
       if (emptyRow) emptyRow.remove();
 
@@ -770,9 +931,25 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         const tr = document.createElement('tr');
         tr.id = rowId;
         tr.className = 'hover:bg-slate-50/80 transition';
+
+        // 2. ตรวจสอบขนาดไฟล์แต่ละไฟล์ไม่ให้เกิน MAX_FILE_SIZE_MB (60 MB)
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+          tr.innerHTML = `
+            <td class="py-4 px-5 font-bold text-slate-800">${escapeHtml(file.name)}</td>
+            <td colspan="3" class="py-4 px-5 text-rose-600 text-xs font-medium">
+              ⚠️ ข้ามไฟล์นี้เนื่องจากมีขนาด ${sizeMb} MB (เกินขีดจำกัด ${MAX_FILE_SIZE_MB} MB/ไฟล์ เพื่อรักษาเสถียรภาพหน่วยความจำ)
+            </td>
+          `;
+          resultsBody.prepend(tr);
+          completed++;
+          progressText.textContent = `กำลังประมวลผล ${completed} / ${files.length} ไฟล์`;
+          continue;
+        }
+
         tr.innerHTML = `
           <td class="py-4 px-5 font-medium text-slate-700">${escapeHtml(file.name)}</td>
-          <td colspan="3" class="py-4 px-5 text-slate-400 text-xs">กำลังอ่านค่า EXIF, คำนวณจุดคมชัดสูงสุด และประเมินเกรดคุณภาพ...</td>
+          <td colspan="3" class="py-4 px-5 text-slate-400 text-xs">กำลังอ่านค่า EXIF, สร้างภาพตัวอย่างความละเอียดสูง และประเมินเกรดคุณภาพ...</td>
         `;
         resultsBody.prepend(tr);
 
@@ -789,14 +966,23 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
               <td colspan="3" class="py-4 px-5 text-rose-600 text-xs font-medium">เกิดข้อผิดพลาด: ${escapeHtml(res.error)}</td>
             `;
           } else {
+            // ตั้งค่าโหมดภาพครอปเริ่มต้นในตารางเป็น 'peak' (จุดที่ชัดที่สุด)
+            res.active_crop_mode = 'peak';
+            res.custom_crop = null;
+
             analyzedStore[rowId] = res;
             analyzedOrder.unshift(rowId);
-            renderResultRow(tr, rowId, res);
 
-            document.getElementById('clearAllBtn').classList.remove('hidden');
-            const badge2 = document.getElementById('badgeMenu2');
-            badge2.textContent = analyzedOrder.length;
-            badge2.classList.remove('hidden');
+            // จำกัดจำนวนรายการสะสมในเซสชันไม่ให้เกิน MAX_SESSION_FILES (20 ไฟล์)
+            const evicted = enforceSessionMemoryLimit();
+            if (evicted > 0) {
+              notices.push(
+                `🧠 ระบบจำกัดประวัติในหน่วยความจำสูงสุด <strong>${MAX_SESSION_FILES} ไฟล์</strong> (นำรายการเก่าสุดออก ${evicted} รายการอัตโนมัติ)`
+              );
+            }
+
+            renderResultRow(tr, rowId, res);
+            updateSessionCountUI();
 
             // อัปเดตเมนูอื่นๆ แบบเรียลไทม์
             renderMenu2();
@@ -815,12 +1001,28 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         progressText.textContent = `กำลังประมวลผล ${completed} / ${files.length} ไฟล์`;
       }
 
-      progressText.textContent = `ประมวลผลเสร็จสิ้น (${analyzedOrder.length} ไฟล์ในระบบ)`;
+      if (notices.length > 0) {
+        showUploadNotice(Array.from(new Set(notices)).join('<br/>'));
+      }
+
+      progressText.textContent = `ประมวลผลเสร็จสิ้น (${analyzedOrder.length} / ${MAX_SESSION_FILES} ไฟล์ในระบบ)`;
     }
 
     // =========================================================================
-    // เมนูที่ 1: คงรูปแบบและการแสดงผลเดิมไว้ทั้งหมด + ปุ่มลิงก์ไปดูคะแนนเกรด
+    // เมนูที่ 1: ภาพย่อความละเอียดสูง + เลือกครอปส่วนที่อยู่ในตารางมาเป็นภาพตัวอย่าง
     // =========================================================================
+    function setRowCropPreset(rowId, mode) {
+      const r = analyzedStore[rowId];
+      const tr = document.getElementById(rowId);
+      if (!r || !tr) return;
+      if (mode === 'custom' && !r.custom_crop) {
+        openDetailModal(rowId, 'custom');
+        return;
+      }
+      r.active_crop_mode = mode;
+      renderResultRow(tr, rowId, r);
+    }
+
     function renderResultRow(tr, rowId, r) {
       const fDisplay = r.f_number && r.f_number !== 'N/A' ? `f/${r.f_number}` : 'N/A';
       const focalDisplay = r.focal_length && r.focal_length !== 'N/A' ? `${r.focal_length}mm` : 'N/A';
@@ -835,14 +1037,35 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         gradeCode === 'C' ? 'bg-amber-50 text-amber-700 border-amber-200' :
         'bg-rose-50 text-rose-700 border-rose-200';
 
+      // เลือกภาพครอปตัวอย่างที่แสดงในคอลัมน์ที่ 4 ตามโหมดที่ผู้ใช้เลือก
+      const mode = r.active_crop_mode || 'peak';
+      let displayCropImg = r.sharpest_crop_image;
+      let displayCropTag = `จุดชัดสุด (${r.peak_coords_text})`;
+      let displayCropBorder = 'border-emerald-500';
+
+      if (mode === 'af' && r.af_crop_image) {
+        displayCropImg = r.af_crop_image;
+        displayCropTag = `จุด AF กล้อง (${r.af_coords_text})`;
+        displayCropBorder = 'border-indigo-500';
+      } else if (mode === 'custom' && r.custom_crop) {
+        displayCropImg = r.custom_crop.dataUrl;
+        displayCropTag = `✂️ ครอปเลือกเอง (${r.custom_crop.coordsText})`;
+        displayCropBorder = 'border-amber-500';
+      }
+
       tr.innerHTML = `
         <td class="py-4 px-5 align-top">
-          <div class="flex items-start gap-3">
-            <img src="${r.annotated_image}" alt="Thumb"
-                 onclick="openDetailModal('${rowId}', 'full')"
-                 class="w-16 h-16 rounded-lg object-cover border border-slate-200 cursor-pointer hover:ring-2 hover:ring-indigo-500 shrink-0" />
+          <div class="flex items-start gap-3.5">
+            <div class="relative group cursor-pointer shrink-0" onclick="openDetailModal('${rowId}', '${mode}')" title="คลิกเพื่อดูภาพขนาดเต็มความละเอียดสูง">
+              <img src="${r.annotated_image}" alt="High-Res Preview"
+                   class="w-36 h-28 rounded-xl object-cover border border-slate-200 shadow-xs group-hover:ring-2 group-hover:ring-indigo-500 transition" />
+              <span class="absolute bottom-1.5 right-1.5 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">
+                🔍 ภาพเต็ม
+              </span>
+            </div>
             <div>
               <div class="font-bold text-slate-900">${escapeHtml(r.filename)}</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">ความละเอียด: ${escapeHtml(r.resolution || '-')}</div>
               <div class="text-xs text-slate-600 mt-1">📷 กล้อง: <span class="font-medium">${escapeHtml(r.camera)}</span></div>
               <div class="text-xs text-slate-600 mt-0.5">🔭 เลนส์: <span class="font-medium text-indigo-700">${escapeHtml(r.lens)}</span></div>
             </div>
@@ -881,16 +1104,40 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
 
         <td class="py-4 px-5 align-top text-center">
           <div class="flex flex-col items-center gap-2">
-            <div class="relative group cursor-pointer" onclick="openDetailModal('${rowId}', 'crop')" title="คลิกเพื่อแสดงรายละเอียดส่วนที่คมชัดที่สุด">
-              <img src="${r.sharpest_crop_image}" alt="Sharpest Crop"
-                   class="w-20 h-20 rounded-xl object-cover border-2 border-emerald-500 shadow-sm group-hover:scale-105 transition" />
-              <span class="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
+            <!-- ภาพครอปตัวอย่างความละเอียดสูงในตาราง -->
+            <div class="relative group cursor-pointer" onclick="openDetailModal('${rowId}', '${mode}')" title="คลิกเพื่อขยาย 100%–200% หรือเลือกครอปส่วนอื่น">
+              <img src="${displayCropImg}" alt="Sharpness Crop Sample"
+                   class="w-32 h-32 rounded-xl object-cover border-2 ${displayCropBorder} shadow-sm group-hover:scale-105 transition" />
+              <span class="absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">
+                ${escapeHtml(displayCropTag)}
+              </span>
+              <span class="absolute bottom-1.5 right-1.5 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
                 🔍 ขยาย
               </span>
             </div>
-            <button onclick="openDetailModal('${rowId}', 'crop')"
-                    class="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition">
-              <span>🔍 พิกัด ${escapeHtml(r.af_point)}</span>
+
+            <!-- ปุ่มสลับจุดตัวอย่างอย่างรวดเร็ว -->
+            <div class="flex flex-wrap items-center justify-center gap-1 text-[11px]">
+              <button onclick="setRowCropPreset('${rowId}', 'peak')"
+                      class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition ${mode === 'peak' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
+                จุดชัดสุด
+              </button>
+              <button onclick="setRowCropPreset('${rowId}', 'af')"
+                      class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition ${mode === 'af' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
+                จุดกล้อง
+              </button>
+              ${r.custom_crop ? `
+                <button onclick="setRowCropPreset('${rowId}', 'custom')"
+                        class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition ${mode === 'custom' ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}">
+                  ที่เลือกเอง
+                </button>
+              ` : ''}
+            </div>
+
+            <!-- ปุ่มเปิดเครื่องมือเลือกครอปส่วนที่อยู่ในตาราง -->
+            <button onclick="openDetailModal('${rowId}', 'custom')"
+                    class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition cursor-pointer">
+              <span>✂️ เลือกครอปส่วนภาพ</span>
             </button>
           </div>
         </td>
@@ -955,6 +1202,10 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           gCode === 'C' ? 'bg-amber-100 text-amber-800 border-amber-300' :
           'bg-rose-100 text-rose-800 border-rose-300';
 
+        const thumbSrc = (r.active_crop_mode === 'custom' && r.custom_crop)
+          ? r.custom_crop.dataUrl
+          : r.sharpest_crop_image;
+
         const issuesHtml = (q.issues_detected || []).map(iss => {
           const isOk = iss.startsWith('✅');
           return `<div class="text-xs px-2.5 py-1 rounded-lg border ${isOk ? 'bg-emerald-50/70 text-emerald-800 border-emerald-200' : 'bg-rose-50/70 text-rose-800 border-rose-200'}">${escapeHtml(iss)}</div>`;
@@ -964,8 +1215,8 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           <tr class="hover:bg-slate-50/80 transition">
             <td class="py-4 px-5 align-top">
               <div class="flex items-start gap-3">
-                <img src="${r.sharpest_crop_image}" onclick="openDetailModal('${id}', 'crop')"
-                     class="w-14 h-14 rounded-xl object-cover border border-slate-200 cursor-pointer shrink-0" />
+                <img src="${thumbSrc}" onclick="openDetailModal('${id}', '${r.active_crop_mode || 'peak'}')"
+                     class="w-24 h-24 rounded-xl object-cover border border-slate-200 cursor-pointer shrink-0 hover:ring-2 hover:ring-indigo-500 transition" />
                 <div>
                   <div class="font-bold text-slate-900">${escapeHtml(r.filename)}</div>
                   <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(r.camera)} • ${escapeHtml(r.lens)}</div>
@@ -1057,13 +1308,180 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     }
 
     // =========================================================================
+    // Fallback Pure-Canvas Chart Drawers (ทำงานแม้ CDN Chart.js ถูกบล็อกหรือช้า)
+    // =========================================================================
+    function drawFallbackHistogram(canvas, hist) {
+      const parent = canvas.parentElement;
+      const w = Math.max(300, parent.clientWidth - 24);
+      const h = Math.max(150, parent.clientHeight - 24);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      const padL = 32, padR = 10, padT = 14, padB = 22;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+      const maxVal = Math.max(1, ...hist.r, ...hist.g, ...hist.b);
+
+      // Grid lines
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (plotH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(w - padR, y);
+        ctx.stroke();
+      }
+
+      const channels = [
+        { data: hist.r, stroke: 'rgba(239,68,68,0.9)', fill: 'rgba(239,68,68,0.14)' },
+        { data: hist.g, stroke: 'rgba(16,185,129,0.9)', fill: 'rgba(16,185,129,0.14)' },
+        { data: hist.b, stroke: 'rgba(59,130,246,0.9)', fill: 'rgba(59,130,246,0.14)' },
+      ];
+
+      channels.forEach(ch => {
+        const n = ch.data.length;
+        ctx.beginPath();
+        ctx.moveTo(padL, padT + plotH);
+        ch.data.forEach((v, idx) => {
+          const x = padL + (idx / Math.max(1, n - 1)) * plotW;
+          const y = padT + plotH - (v / maxVal) * plotH;
+          ctx.lineTo(x, y);
+        });
+        ctx.lineTo(padL + plotW, padT + plotH);
+        ctx.closePath();
+        ctx.fillStyle = ch.fill;
+        ctx.fill();
+
+        ctx.beginPath();
+        ch.data.forEach((v, idx) => {
+          const x = padL + (idx / Math.max(1, n - 1)) * plotW;
+          const y = padT + plotH - (v / maxVal) * plotH;
+          if (idx === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = ch.stroke;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      });
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px sans-serif';
+      ctx.fillText('0 (มืด)', padL, h - 6);
+      ctx.fillText('128', padL + plotW / 2 - 10, h - 6);
+      ctx.fillText('255 (สว่าง)', w - 58, h - 6);
+    }
+
+    function drawFallbackGroupedBar(canvas, labels, seriesA, seriesB, nameA, nameB, colorA, colorB) {
+      const parent = canvas.parentElement;
+      const w = Math.max(320, parent.clientWidth - 12);
+      const h = Math.max(220, parent.clientHeight - 12);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      const padL = 44, padR = 16, padT = 28, padB = 42;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+      const maxVal = Math.max(10, ...seriesA, ...seriesB);
+
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px sans-serif';
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (plotH * i) / 4;
+        const val = Math.round(maxVal * (1 - i / 4));
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(w - padR, y);
+        ctx.stroke();
+        ctx.fillText(String(val), 4, y + 3);
+      }
+
+      const n = Math.max(1, labels.length);
+      const groupW = plotW / n;
+      const barW = Math.min(22, Math.max(6, groupW * 0.34));
+
+      labels.forEach((lbl, i) => {
+        const cx = padL + i * groupW + groupW / 2;
+        const hA = (seriesA[i] / maxVal) * plotH;
+        const hB = (seriesB[i] / maxVal) * plotH;
+
+        ctx.fillStyle = colorA;
+        ctx.fillRect(cx - barW - 2, padT + plotH - hA, barW, hA);
+        ctx.fillStyle = colorB;
+        ctx.fillRect(cx + 2, padT + plotH - hB, barW, hB);
+
+        ctx.fillStyle = '#475569';
+        ctx.font = '10px sans-serif';
+        const shortLbl = lbl.length > 10 ? lbl.slice(0, 9) + '…' : lbl;
+        ctx.fillText(shortLbl, cx - 22, padT + plotH + 16);
+      });
+
+      // Legend
+      ctx.fillStyle = colorA;
+      ctx.fillRect(padL, 6, 10, 10);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillText(nameA, padL + 14, 15);
+
+      ctx.fillStyle = colorB;
+      ctx.fillRect(padL + 145, 6, 10, 10);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillText(nameB, padL + 159, 15);
+    }
+
+    function drawFallbackScatter(canvas, points) {
+      const parent = canvas.parentElement;
+      const w = Math.max(320, parent.clientWidth - 12);
+      const h = Math.max(200, parent.clientHeight - 12);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      const padL = 44, padR = 16, padT = 18, padB = 34;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+      const maxX = Math.max(10, ...points.map(p => p.x));
+      const maxY = Math.max(100, ...points.map(p => p.y));
+
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px sans-serif';
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (plotH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(w - padR, y);
+        ctx.stroke();
+        ctx.fillText(String(Math.round(maxY * (1 - i / 4))), 4, y + 3);
+      }
+
+      points.forEach(p => {
+        const x = padL + (p.x / maxX) * plotW;
+        const y = padT + plotH - (p.y / maxY) * plotH;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(79, 70, 229, 0.85)';
+        ctx.fill();
+      });
+
+      ctx.fillStyle = '#475569';
+      ctx.fillText('Edge Density (%) →', padL + plotW / 2 - 40, h - 8);
+    }
+
+    // =========================================================================
     // เมนูที่ 3: วิเคราะห์โครงสร้างเส้นขอบและฮิสโตแกรมแสง (Edge & RGB Histogram)
     // =========================================================================
     function renderMenu3() {
       const container = document.getElementById('edgeHistogramContainer');
       const items = analyzedOrder.map(id => ({ id, r: analyzedStore[id] })).filter(x => x.r);
 
-      Object.values(histCharts).forEach(ch => ch.destroy());
+      Object.values(histCharts).forEach(ch => { try { ch.destroy(); } catch (e) {} });
       Object.keys(histCharts).forEach(k => delete histCharts[k]);
 
       if (!items.length) {
@@ -1107,24 +1525,24 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
-              <!-- Col 1: Original Focus ROI -->
+              <!-- Col 1: High-Res Focus ROI -->
               <div class="md:col-span-3 flex flex-col items-center">
                 <div class="text-xs font-bold text-slate-600 mb-2">1. ภาพพื้นที่จุดโฟกัส (Focus ROI)</div>
-                <img src="${tex.af_roi_image || ''}" alt="Focus ROI" class="w-48 h-48 object-cover rounded-xl border border-slate-200 shadow-xs" />
+                <img src="${tex.af_roi_image || ''}" alt="Focus ROI" class="w-60 h-60 object-cover rounded-xl border border-slate-200 shadow-xs" />
                 <span class="text-[11px] text-slate-400 mt-1.5">ความสว่างเฉลี่ย: ${tex.mean_brightness ?? 0} / 255</span>
               </div>
 
-              <!-- Col 2: Canny Edge Map -->
+              <!-- Col 2: High-Res Canny Edge Map -->
               <div class="md:col-span-3 flex flex-col items-center">
                 <div class="text-xs font-bold text-slate-600 mb-2">2. แผนที่เส้นขอบ (Canny Edge Map)</div>
-                <img src="${tex.canny_edge_image || ''}" alt="Canny Edges" class="w-48 h-48 object-cover rounded-xl border border-slate-800 bg-black shadow-xs" />
+                <img src="${tex.canny_edge_image || ''}" alt="Canny Edges" class="w-60 h-60 object-cover rounded-xl border border-slate-800 bg-black shadow-xs" />
                 <span class="text-[11px] text-slate-400 mt-1.5">สัดส่วนพิกเซลเส้นขอบ: ${tex.edge_density_pct ?? 0}%</span>
               </div>
 
               <!-- Col 3: RGB Histogram -->
               <div class="md:col-span-6">
                 <div class="text-xs font-bold text-slate-600 mb-2">3. กราฟการกระจายแสง 3 ช่องสี (RGB Color Histogram — ROI)</div>
-                <div class="h-48 bg-slate-50/70 rounded-xl p-3 border border-slate-200">
+                <div class="h-52 bg-slate-50/70 rounded-xl p-3 border border-slate-200 relative">
                   <canvas id="histCanvas_${id}"></canvas>
                 </div>
               </div>
@@ -1133,31 +1551,39 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         `;
       }).join('');
 
-      // วาดกราฟ RGB Histogram ด้วย Chart.js
+      // วาดกราฟ RGB Histogram (ใช้ Chart.js เป็นหลัก และมี Canvas Fallback สำรองอัตโนมัติ)
       items.forEach(({ id, r }) => {
         const hist = r.texture?.rgb_histogram;
         const canvas = document.getElementById('histCanvas_' + id);
         if (!hist || !canvas) return;
-        histCharts[id] = new Chart(canvas.getContext('2d'), {
-          type: 'line',
-          data: {
-            labels: hist.bins,
-            datasets: [
-              { label: 'Red', data: hist.r, borderColor: 'rgba(239, 68, 68, 0.9)', backgroundColor: 'rgba(239, 68, 68, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
-              { label: 'Green', data: hist.g, borderColor: 'rgba(16, 185, 129, 0.9)', backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
-              { label: 'Blue', data: hist.b, borderColor: 'rgba(59, 130, 246, 0.9)', backgroundColor: 'rgba(59, 130, 246, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 11 } } } },
-            scales: {
-              x: { title: { display: true, text: 'ระดับความสว่าง (0 = มืดสุด, 255 = สว่างสุด)', font: { size: 10 } }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
-              y: { title: { display: true, text: 'สัดส่วนพิกเซล (%)', font: { size: 10 } }, ticks: { font: { size: 10 } }, beginAtZero: true }
-            }
+        try {
+          if (typeof Chart !== 'undefined') {
+            histCharts[id] = new Chart(canvas.getContext('2d'), {
+              type: 'line',
+              data: {
+                labels: hist.bins,
+                datasets: [
+                  { label: 'Red', data: hist.r, borderColor: 'rgba(239, 68, 68, 0.9)', backgroundColor: 'rgba(239, 68, 68, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+                  { label: 'Green', data: hist.g, borderColor: 'rgba(16, 185, 129, 0.9)', backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+                  { label: 'Blue', data: hist.b, borderColor: 'rgba(59, 130, 246, 0.9)', backgroundColor: 'rgba(59, 130, 246, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 11 } } } },
+                scales: {
+                  x: { title: { display: true, text: 'ระดับความสว่าง (0 = มืดสุด, 255 = สว่างสุด)', font: { size: 10 } }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+                  y: { title: { display: true, text: 'สัดส่วนพิกเซล (%)', font: { size: 10 } }, ticks: { font: { size: 10 } }, beginAtZero: true }
+                }
+              }
+            });
+          } else {
+            drawFallbackHistogram(canvas, hist);
           }
-        });
+        } catch (err) {
+          drawFallbackHistogram(canvas, hist);
+        }
       });
     }
 
@@ -1169,9 +1595,9 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
       const emptyEl = document.getElementById('statsEmptyState');
       const contentEl = document.getElementById('statsContent');
 
-      if (chartPerImage) { chartPerImage.destroy(); chartPerImage = null; }
-      if (chartIso) { chartIso.destroy(); chartIso = null; }
-      if (chartScatter) { chartScatter.destroy(); chartScatter = null; }
+      if (chartPerImage) { try { chartPerImage.destroy(); } catch (e) {} chartPerImage = null; }
+      if (chartIso) { try { chartIso.destroy(); } catch (e) {} chartIso = null; }
+      if (chartScatter) { try { chartScatter.destroy(); } catch (e) {} chartScatter = null; }
 
       if (!items.length) {
         emptyEl.classList.remove('hidden');
@@ -1182,29 +1608,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
       emptyEl.classList.add('hidden');
       contentEl.classList.remove('hidden');
 
-      // 1. Bar Chart: Per-Image AF Sharpness vs Peak Sharpness
-      const labels = items.map(r => r.filename.length > 18 ? r.filename.slice(0, 16) + '…' : r.filename);
-      const afSharpData = items.map(r => r.af_sharpness);
-      const peakSharpData = items.map(r => r.peak_sharpness);
-
-      chartPerImage = new Chart(document.getElementById('chartPerImageSharpness').getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [
-            { label: 'AF Point Sharpness', data: afSharpData, backgroundColor: 'rgba(59, 130, 246, 0.85)', borderRadius: 6 },
-            { label: 'Peak Sharpness', data: peakSharpData, backgroundColor: 'rgba(16, 185, 129, 0.85)', borderRadius: 6 }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: 'top' } },
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'Laplacian Variance' } } }
-        }
-      });
-
-      // 2. ISO Group Analysis (เหมือนในสมุดโน้ตบุ๊ก)
+      // คำนวณกลุ่ม ISO และเติมข้อมูลลงในตารางก่อนเสมอ (ป้องกัน Error จาก Chart ขัดขวางการแสดงผลตาราง)
       const isoGroups = {};
       items.forEach(r => {
         const isoNum = parseInt(r.iso, 10);
@@ -1224,37 +1628,6 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         return a.iso - b.iso;
       });
 
-      chartIso = new Chart(document.getElementById('chartIsoGroup').getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: sortedIso.map(g => g.iso === 'Unknown' ? 'No ISO' : `ISO ${g.iso}`),
-          datasets: [
-            {
-              label: 'เฉลี่ย AF Sharpness',
-              data: sortedIso.map(g => Math.round(g.sumSharp / g.count)),
-              backgroundColor: 'rgba(13, 148, 136, 0.85)',
-              borderRadius: 6,
-              yAxisID: 'y'
-            },
-            {
-              label: 'เฉลี่ย Quality Score (0-100)',
-              data: sortedIso.map(g => Number((g.sumQuality / g.count).toFixed(1))),
-              backgroundColor: 'rgba(99, 102, 241, 0.85)',
-              borderRadius: 6,
-              yAxisID: 'y1'
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Avg Sharpness' } },
-            y1: { type: 'linear', position: 'right', beginAtZero: true, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: 'Quality Score' } }
-          }
-        }
-      });
-
       // Populate ISO Summary Table
       document.getElementById('isoGroupTableBody').innerHTML = sortedIso.map(g => `
         <tr class="hover:bg-slate-50">
@@ -1266,40 +1639,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         </tr>
       `).join('');
 
-      // 3. Scatter Plot: Edge Density (%) vs AF Sharpness
-      chartScatter = new Chart(document.getElementById('chartEdgeScatter').getContext('2d'), {
-        type: 'scatter',
-        data: {
-          datasets: [{
-            label: 'ภาพถ่ายแต่ละใบ (Edge Density % vs Sharpness)',
-            data: items.map(r => ({
-              x: r.texture?.edge_density_pct || 0,
-              y: r.af_sharpness || 0,
-              filename: r.filename
-            })),
-            backgroundColor: 'rgba(79, 70, 229, 0.8)',
-            pointRadius: 6,
-            pointHoverRadius: 8
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `${ctx.raw.filename}: Edge ${ctx.raw.x}%, Sharpness ${ctx.raw.y}`
-              }
-            }
-          },
-          scales: {
-            x: { title: { display: true, text: 'Edge Density (%)' }, beginAtZero: true },
-            y: { title: { display: true, text: 'AF Sharpness Score' }, beginAtZero: true }
-          }
-        }
-      });
-
-      // 4. Deep MakerNotes Table
+      // Populate Deep MakerNotes Table
       document.getElementById('deepMetadataBody').innerHTML = items.map(r => {
         const d = r.deep_notes || {};
         const rollStr = d.roll_angle !== null && d.roll_angle !== undefined ? `${d.roll_angle}°` : 'N/A';
@@ -1317,6 +1657,127 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           </tr>
         `;
       }).join('');
+
+      // เตรียมข้อมูลสำหรับกราฟทั้ง 3 ชุด
+      const labels = items.map(r => r.filename.length > 18 ? r.filename.slice(0, 16) + '…' : r.filename);
+      const afSharpData = items.map(r => r.af_sharpness || 0);
+      const peakSharpData = items.map(r => r.peak_sharpness || 0);
+
+      const isoLabels = sortedIso.map(g => g.iso === 'Unknown' ? 'No ISO' : `ISO ${g.iso}`);
+      const isoAvgSharp = sortedIso.map(g => Math.round(g.sumSharp / g.count));
+      const isoAvgQuality = sortedIso.map(g => Number((g.sumQuality / g.count).toFixed(1)));
+
+      const scatterPoints = items.map(r => ({
+        x: r.texture?.edge_density_pct || 0,
+        y: r.af_sharpness || 0,
+        filename: r.filename
+      }));
+
+      // Chart 1: Per-Image AF Sharpness vs Peak Sharpness
+      const c1 = document.getElementById('chartPerImageSharpness');
+      try {
+        if (typeof Chart !== 'undefined') {
+          chartPerImage = new Chart(c1.getContext('2d'), {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [
+                { label: 'AF Point Sharpness', data: afSharpData, backgroundColor: 'rgba(59, 130, 246, 0.85)', borderRadius: 6 },
+                { label: 'Peak Sharpness', data: peakSharpData, backgroundColor: 'rgba(16, 185, 129, 0.85)', borderRadius: 6 }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'top' } },
+              scales: { y: { beginAtZero: true, title: { display: true, text: 'Laplacian Variance' } } }
+            }
+          });
+        } else {
+          drawFallbackGroupedBar(c1, labels, afSharpData, peakSharpData, 'AF Sharpness', 'Peak Sharpness', 'rgba(59, 130, 246, 0.85)', 'rgba(16, 185, 129, 0.85)');
+        }
+      } catch (e) {
+        drawFallbackGroupedBar(c1, labels, afSharpData, peakSharpData, 'AF Sharpness', 'Peak Sharpness', 'rgba(59, 130, 246, 0.85)', 'rgba(16, 185, 129, 0.85)');
+      }
+
+      // Chart 2: ISO Group Analysis
+      const c2 = document.getElementById('chartIsoGroup');
+      try {
+        if (typeof Chart !== 'undefined') {
+          chartIso = new Chart(c2.getContext('2d'), {
+            type: 'bar',
+            data: {
+              labels: isoLabels,
+              datasets: [
+                {
+                  label: 'เฉลี่ย AF Sharpness',
+                  data: isoAvgSharp,
+                  backgroundColor: 'rgba(13, 148, 136, 0.85)',
+                  borderRadius: 6,
+                  yAxisID: 'y'
+                },
+                {
+                  label: 'เฉลี่ย Quality Score (0-100)',
+                  data: isoAvgQuality,
+                  backgroundColor: 'rgba(99, 102, 241, 0.85)',
+                  borderRadius: 6,
+                  yAxisID: 'y1'
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Avg Sharpness' } },
+                y1: { type: 'linear', position: 'right', beginAtZero: true, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: 'Quality Score' } }
+              }
+            }
+          });
+        } else {
+          drawFallbackGroupedBar(c2, isoLabels, isoAvgSharp, isoAvgQuality, 'Avg Sharpness', 'Quality Score', 'rgba(13, 148, 136, 0.85)', 'rgba(99, 102, 241, 0.85)');
+        }
+      } catch (e) {
+        drawFallbackGroupedBar(c2, isoLabels, isoAvgSharp, isoAvgQuality, 'Avg Sharpness', 'Quality Score', 'rgba(13, 148, 136, 0.85)', 'rgba(99, 102, 241, 0.85)');
+      }
+
+      // Chart 3: Scatter Plot Edge Density vs Sharpness
+      const c3 = document.getElementById('chartEdgeScatter');
+      try {
+        if (typeof Chart !== 'undefined') {
+          chartScatter = new Chart(c3.getContext('2d'), {
+            type: 'scatter',
+            data: {
+              datasets: [{
+                label: 'ภาพถ่ายแต่ละใบ (Edge Density % vs Sharpness)',
+                data: scatterPoints,
+                backgroundColor: 'rgba(79, 70, 229, 0.85)',
+                pointRadius: 6,
+                pointHoverRadius: 8
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) => `${ctx.raw.filename}: Edge ${ctx.raw.x}%, Sharpness ${ctx.raw.y}`
+                  }
+                }
+              },
+              scales: {
+                x: { title: { display: true, text: 'Edge Density (%)' }, beginAtZero: true },
+                y: { title: { display: true, text: 'AF Sharpness Score' }, beginAtZero: true }
+              }
+            }
+          });
+        } else {
+          drawFallbackScatter(c3, scatterPoints);
+        }
+      } catch (e) {
+        drawFallbackScatter(c3, scatterPoints);
+      }
     }
 
     // =========================================================================
@@ -1367,16 +1828,236 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     }
 
     // =========================================================================
-    // Modal Functions (คงเดิมจากเวอร์ชัน 1)
+    // Interactive Crop & High-Res Detail Modal (เลือกครอปส่วนภาพมาแสดงในตาราง)
     // =========================================================================
-    function openDetailModal(rowId, focusTab) {
+    function computeCanvasLaplacianVariance(ctx, w, h) {
+      const imgData = ctx.getImageData(0, 0, w, h).data;
+      const gray = new Float32Array(w * h);
+      for (let i = 0, j = 0; i < imgData.length; i += 4, j++) {
+        gray[j] = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
+      }
+      let sum = 0, sumSq = 0, count = 0;
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const idx = y * w + x;
+          const lap = gray[idx - w] + gray[idx - 1] - 4 * gray[idx] + gray[idx + 1] + gray[idx + w];
+          sum += lap;
+          sumSq += lap * lap;
+          count++;
+        }
+      }
+      if (count === 0) return 0;
+      const mean = sum / count;
+      return Math.max(0, Math.round((sumSq / count - mean * mean) * 10) / 10);
+    }
+
+    function performCropFromCleanImage(normX, normY, normW, normH, labelPrefix) {
+      if (!cleanSourceImgObj || !cleanSourceImgObj.naturalWidth) return;
+      const natW = cleanSourceImgObj.naturalWidth;
+      const natH = cleanSourceImgObj.naturalHeight;
+
+      const sx = Math.max(0, Math.min(natW - 20, Math.round(normX * natW)));
+      const sy = Math.max(0, Math.min(natH - 20, Math.round(normY * natH)));
+      const sw = Math.max(40, Math.min(natW - sx, Math.round(normW * natW)));
+      const sh = Math.max(40, Math.min(natH - sy, Math.round(normH * natH)));
+
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = sw;
+      offCanvas.height = sh;
+      const offCtx = offCanvas.getContext('2d');
+      offCtx.drawImage(cleanSourceImgObj, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      const sharpnessVal = computeCanvasLaplacianVariance(offCtx, sw, sh);
+      const dataUrl = offCanvas.toDataURL('image/jpeg', 0.95);
+      const cxPct = Math.round(((sx + sw / 2) / natW) * 100);
+      const cyPct = Math.round(((sy + sh / 2) / natH) * 100);
+      const coordsText = `X:${cxPct}%, Y:${cyPct}%`;
+
+      pendingCustomCrop = {
+        dataUrl,
+        coordsText,
+        sharpness: sharpnessVal,
+        normRect: { x: normX, y: normY, w: normW, h: normH }
+      };
+
+      document.getElementById('modalCropImg').src = dataUrl;
+      document.getElementById('modalCropModeLabel').innerHTML = `<span>✂️</span> ภาพครอปที่เลือกเอง (${coordsText})`;
+      document.getElementById('modalCropInfoText').textContent = `${labelPrefix} (${coordsText} • ขนาด ${sw}×${sh}px)`;
+      document.getElementById('modalCropSharpnessInfo').textContent = `ดัชนีคอนทราสต์/ความคมชัดเฉพาะส่วนที่เลือก: ${sharpnessVal}`;
+
+      updateSelectionBoxVisual(normX, normY, normW, normH, `${labelPrefix} (${coordsText})`);
+    }
+
+    function updateSelectionBoxVisual(normX, normY, normW, normH, labelText) {
+      const stage = document.getElementById('cropStage');
+      const box = document.getElementById('cropSelectionBox');
+      const lbl = document.getElementById('cropSelectionLabel');
+      const stageW = stage.clientWidth;
+      const stageH = stage.clientHeight;
+      if (!stageW || !stageH) return;
+
+      box.style.left = `${normX * stageW}px`;
+      box.style.top = `${normY * stageH}px`;
+      box.style.width = `${normW * stageW}px`;
+      box.style.height = `${normH * stageH}px`;
+      lbl.textContent = labelText;
+      box.classList.remove('hidden');
+    }
+
+    function setCropBoxRatio(ratio) {
+      cropBoxRatio = ratio;
+      if (pendingCustomCrop && pendingCustomCrop.normRect) {
+        const cx = pendingCustomCrop.normRect.x + pendingCustomCrop.normRect.w / 2;
+        const cy = pendingCustomCrop.normRect.y + pendingCustomCrop.normRect.h / 2;
+        const nw = Math.min(0.95, ratio);
+        const nh = Math.min(0.95, ratio);
+        const nx = Math.max(0, Math.min(1 - nw, cx - nw / 2));
+        const ny = Math.max(0, Math.min(1 - nh, cy - nh / 2));
+        performCropFromCleanImage(nx, ny, nw, nh, 'ส่วนที่เลือก');
+      }
+    }
+
+    function selectPresetCrop(preset) {
+      const r = analyzedStore[currentModalRowId];
+      if (!r) return;
+      currentCropPreset = preset;
+
+      if (preset === 'peak') {
+        pendingCustomCrop = null;
+        document.getElementById('modalCropImg').src = r.sharpest_crop_image;
+        document.getElementById('modalCropModeLabel').innerHTML = `<span>🔍</span> จุดที่คมชัดที่สุด (Peak Sharpness 100% Crop)`;
+        document.getElementById('modalCropInfoText').textContent = `จุดที่คมชัดที่สุด (${r.peak_coords_text})`;
+        document.getElementById('modalCropSharpnessInfo').textContent = `ค่าความคมชัด Peak Sharpness: ${r.peak_sharpness}`;
+        if (r.peak_norm_coords) {
+          const nw = cropBoxRatio, nh = cropBoxRatio;
+          const nx = Math.max(0, Math.min(1 - nw, r.peak_norm_coords.x / 100 - nw / 2));
+          const ny = Math.max(0, Math.min(1 - nh, r.peak_norm_coords.y / 100 - nh / 2));
+          updateSelectionBoxVisual(nx, ny, nw, nh, `จุดชัดสุด (${r.peak_coords_text})`);
+        }
+      } else if (preset === 'af') {
+        pendingCustomCrop = null;
+        document.getElementById('modalCropImg').src = r.af_crop_image || r.sharpest_crop_image;
+        document.getElementById('modalCropModeLabel').innerHTML = `<span>🎯</span> จุดโฟกัสกล้อง (Camera AF Point 100% Crop)`;
+        document.getElementById('modalCropInfoText').textContent = `จุดโฟกัสกล้อง ${r.af_point} (${r.af_coords_text})`;
+        document.getElementById('modalCropSharpnessInfo').textContent = `ค่าความคมชัด AF Point Sharpness: ${r.af_sharpness}`;
+        if (r.af_norm_coords) {
+          const nw = cropBoxRatio, nh = cropBoxRatio;
+          const nx = Math.max(0, Math.min(1 - nw, r.af_norm_coords.x / 100 - nw / 2));
+          const ny = Math.max(0, Math.min(1 - nh, r.af_norm_coords.y / 100 - nh / 2));
+          updateSelectionBoxVisual(nx, ny, nw, nh, `จุด AF (${r.af_coords_text})`);
+        }
+      } else if (preset === 'center') {
+        const nw = cropBoxRatio, nh = cropBoxRatio;
+        performCropFromCleanImage(0.5 - nw / 2, 0.5 - nh / 2, nw, nh, 'กึ่งกลางภาพ');
+      }
+    }
+
+    function applySelectedCropToTable() {
+      const r = analyzedStore[currentModalRowId];
+      const tr = document.getElementById(currentModalRowId);
+      if (!r || !tr) return;
+
+      if (pendingCustomCrop) {
+        r.custom_crop = pendingCustomCrop;
+        r.active_crop_mode = 'custom';
+      } else {
+        r.active_crop_mode = currentCropPreset === 'af' ? 'af' : 'peak';
+      }
+
+      renderResultRow(tr, currentModalRowId, r);
+      if (activeMenu === 'menu2') renderMenu2();
+      closeModal();
+    }
+
+    function downloadCurrentCrop() {
+      const r = analyzedStore[currentModalRowId];
+      const src = document.getElementById('modalCropImg').src;
+      if (!src) return;
+      const a = document.createElement('a');
+      a.href = src;
+      const baseName = (r?.filename || 'sample').replace(/\.[^.]+$/, '');
+      a.download = `${baseName}_crop_preview.jpg`;
+      a.click();
+    }
+
+    function toggleCropSourceOverlay() {
+      const r = analyzedStore[currentModalRowId];
+      if (!r) return;
+      const showOverlay = document.getElementById('toggleOverlayCheckbox').checked;
+      document.getElementById('modalFullImg').src = showOverlay
+        ? r.annotated_image
+        : (r.clean_preview_image || r.annotated_image);
+    }
+
+    // Pointer Events สำหรับลากกรอบครอปบนภาพต้นฉบับ
+    const cropStage = document.getElementById('cropStage');
+    cropStage.addEventListener('pointerdown', (e) => {
+      const rect = cropStage.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      isDraggingCrop = true;
+      cropStage.setPointerCapture(e.pointerId);
+      dragStartPos = {
+        x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+        y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+      };
+    });
+
+    cropStage.addEventListener('pointermove', (e) => {
+      if (!isDraggingCrop) return;
+      const rect = cropStage.getBoundingClientRect();
+      const curX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const curY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      const nx = Math.min(dragStartPos.x, curX);
+      const ny = Math.min(dragStartPos.y, curY);
+      const nw = Math.abs(curX - dragStartPos.x);
+      const nh = Math.abs(curY - dragStartPos.y);
+      if (nw > 0.02 && nh > 0.02) {
+        updateSelectionBoxVisual(nx, ny, nw, nh, 'กำลังลากเลือกพื้นที่...');
+      }
+    });
+
+    cropStage.addEventListener('pointerup', (e) => {
+      if (!isDraggingCrop) return;
+      isDraggingCrop = false;
+      const rect = cropStage.getBoundingClientRect();
+      const curX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const curY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      const dx = Math.abs(curX - dragStartPos.x);
+      const dy = Math.abs(curY - dragStartPos.y);
+
+      currentCropPreset = 'custom';
+      if (dx < 0.03 || dy < 0.03) {
+        // คลิกจุดเดียว -> ครอปกรอบขนาด cropBoxRatio รอบจุดที่คลิก
+        const nw = cropBoxRatio;
+        const nh = cropBoxRatio;
+        const nx = Math.max(0, Math.min(1 - nw, curX - nw / 2));
+        const ny = Math.max(0, Math.min(1 - nh, curY - nh / 2));
+        performCropFromCleanImage(nx, ny, nw, nh, 'ครอปจุดที่คลิก');
+      } else {
+        // ลากกรอบ -> ครอปตามสี่เหลี่ยมที่ลาก
+        const nx = Math.min(dragStartPos.x, curX);
+        const ny = Math.min(dragStartPos.y, curY);
+        performCropFromCleanImage(nx, ny, dx, dy, 'ครอปกรอบที่ลาก');
+      }
+    });
+
+    function openDetailModal(rowId, initialMode) {
       const r = analyzedStore[rowId];
       if (!r) return;
 
-      document.getElementById('modalTitle').textContent = `${r.filename} — เปรียบเทียบจุดโฟกัสและส่วนที่ชัดที่สุด`;
-      document.getElementById('modalSubtitle').textContent = `${r.camera} | ${r.lens} | พิกัดกล้อง: ${r.af_point}`;
-      document.getElementById('modalCropImg').src = r.sharpest_crop_image;
-      document.getElementById('modalFullImg').src = r.annotated_image;
+      currentModalRowId = rowId;
+      pendingCustomCrop = null;
+
+      document.getElementById('modalTitle').textContent = `${r.filename} — ตรวจสอบรายละเอียดความคมชัดและเลือกครอปภาพตัวอย่าง`;
+      document.getElementById('modalSubtitle').textContent = `${r.camera} | ${r.lens} | ความละเอียดต้นฉบับ: ${r.resolution || '-'} | พิกัดกล้อง: ${r.af_point}`;
+
+      // โหลดภาพต้นฉบับสะอาดสำหรับใช้ครอปส่วนภาพ
+      const cleanSrc = r.clean_preview_image || r.annotated_image;
+      cleanSourceImgObj = new Image();
+      cleanSourceImgObj.src = cleanSrc;
+
+      document.getElementById('toggleOverlayCheckbox').checked = false;
+      document.getElementById('modalFullImg').src = cleanSrc;
 
       document.getElementById('modalAfSharpness').textContent = r.af_sharpness;
       document.getElementById('modalAfCoords').textContent = `พิกัดกล้อง (${r.af_point}): ${r.af_coords_text}`;
@@ -1388,6 +2069,22 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
 
       setCropZoom(1);
       document.getElementById('detailModal').classList.remove('hidden');
+
+      setTimeout(() => {
+        if (initialMode === 'custom' && r.custom_crop) {
+          pendingCustomCrop = r.custom_crop;
+          document.getElementById('modalCropImg').src = r.custom_crop.dataUrl;
+          document.getElementById('modalCropModeLabel').innerHTML = `<span>✂️</span> ภาพครอปที่เลือกเอง (${r.custom_crop.coordsText})`;
+          document.getElementById('modalCropInfoText').textContent = `ครอปที่เลือกไว้ (${r.custom_crop.coordsText})`;
+          document.getElementById('modalCropSharpnessInfo').textContent = `ดัชนีคอนทราสต์/ความคมชัดเฉพาะส่วนที่เลือก: ${r.custom_crop.sharpness}`;
+          const nr = r.custom_crop.normRect;
+          if (nr) updateSelectionBoxVisual(nr.x, nr.y, nr.w, nr.h, `ที่เลือกไว้ (${r.custom_crop.coordsText})`);
+        } else if (initialMode === 'af') {
+          selectPresetCrop('af');
+        } else {
+          selectPresetCrop('peak');
+        }
+      }, 60);
     }
 
     function closeModal() {
