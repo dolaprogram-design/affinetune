@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.1</title>
+  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.1 — Mr.Prasongjit Butsalee</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
 /* Precompiled Tailwind Utility Styles (Production-Ready, Zero Console Warning) */
@@ -204,6 +204,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
 .mt-2 { margin-top: 0.5rem; }
 .mt-3 { margin-top: 0.75rem; }
 .mt-4 { margin-top: 1rem; }
+.mt-6 { margin-top: 1.5rem; }
 .mx-auto { margin-left: auto; margin-right: auto; }
 .object-contain { object-fit: contain; }
 .object-cover { object-fit: cover; }
@@ -361,6 +362,9 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
               <span>🔬</span> ระบบวิเคราะห์ความคมชัดเชิงแสง &amp; ประเมินคุณภาพภาพถ่าย (Optical AF &amp; Quality Analytics)
             </h1>
             <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">v2.1 High-Res &amp; Safe-RAM</span>
+            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              👨‍💻 พัฒนาโดย : <strong class="text-indigo-700">Mr.Prasongjit Butsalee</strong>
+            </span>
           </div>
           <p class="text-sm text-slate-500 mt-1">
             สกัดข้อมูล EXIF / AF Fine-tune จริงจากไฟล์ RAW (.NEF, .CR2, .CR3, .ARW, .DNG) และ JPG พร้อมระบบเลือกครอปภาพตัวอย่างความละเอียดสูงและจัดเกรดอัตโนมัติ
@@ -548,7 +552,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
             <span>📐</span> วิเคราะห์โครงสร้างเส้นขอบ (Canny Edge Map) และการกระจายแสง (RGB Histogram)
           </h2>
           <p class="text-xs text-slate-500 mt-0.5">
-            ตรวจสอบรายละเอียดพื้นผิวบริเวณจุดโฟกัส (ROI ความละเอียดสูง 560×560px) พร้อมกราฟการกระจายแสง 3 ช่องสี
+            ตรวจสอบรายละเอียดพื้นผิวบริเวณจุดโฟกัส (ROI ความละเอียดสูง 480×480px) พร้อมกราฟการกระจายแสง 3 ช่องสี
           </p>
         </div>
       </div>
@@ -797,6 +801,22 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         </div>
       </div>
     </section>
+
+    <!-- ===================================================================== -->
+    <!-- Footer Credit Bar                                                     -->
+    <!-- ===================================================================== -->
+    <footer class="mt-6 bg-white rounded-2xl border border-slate-200 px-6 py-4 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs text-slate-500">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="font-semibold text-slate-700">🔬 Pro Lens &amp; Camera Optical Sharpness &amp; Quality Analytics</span>
+        <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200">v2.1</span>
+      </div>
+      <div class="flex items-center gap-1.5 text-slate-600">
+        <span>พัฒนาโดย (Developed by) :</span>
+        <span class="font-bold text-indigo-700 bg-indigo-50/70 px-2.5 py-1 rounded-lg border border-indigo-200">
+          Mr.Prasongjit Butsalee
+        </span>
+      </div>
+    </footer>
   </div>
 
   <!-- ===================================================================== -->
@@ -1103,6 +1123,9 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           const formData = new FormData();
           formData.append('file', file);
           const resp = await fetch('/analyze-file', { method: 'POST', body: formData });
+          if (!resp.ok) {
+            throw new Error(`เซิร์ฟเวอร์ขัดข้องชั่วคราว (HTTP ${resp.status}) — ไฟล์อาจมีขนาดใหญ่เกินหน่วยความจำเซิร์ฟเวอร์`);
+          }
           const data = await resp.json();
           const res = data.result;
 
@@ -1965,7 +1988,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
       emptyEl.classList.add('hidden');
       contentEl.classList.remove('hidden');
 
-      // คำนวณกลุ่ม ISO และเติมข้อมูลลงในตารางก่อนเสมอ (ป้องกัน Error จาก Chart ขัดขวางการแสดงผลตาราง)
+      // คำนวณกลุ่ม ISO และเติมข้อมูลลงในตารางก่อนเสมอ
       const isoGroups = {};
       items.forEach(r => {
         const isoNum = parseInt(r.iso, 10);
