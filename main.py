@@ -1,3 +1,4 @@
+# Pro Lens & Camera Optical Sharpness & Quality Analytics API v2.0 (Production Ready)
 import os
 import re
 import gc
@@ -110,14 +111,14 @@ def normalize_lens_brand(name: str) -> str:
     clean = re.sub(r'\s+', ' ', clean)
 
     for brand in SUPPORTED_BRANDS:
-        if re.search(rf'{re.escape(brand)}', clean, re.IGNORECASE):
-            clean = re.sub(rf'{re.escape(brand)}', brand, clean, flags=re.IGNORECASE)
+        if re.search(rf'\b{re.escape(brand)}\b', clean, re.IGNORECASE):
+            clean = re.sub(rf'\b{re.escape(brand)}\b', brand, clean, flags=re.IGNORECASE)
 
-    has_brand = any(re.search(rf'{re.escape(b)}', clean, re.IGNORECASE) for b in SUPPORTED_BRANDS)
+    has_brand = any(re.search(rf'\b{re.escape(b)}\b', clean, re.IGNORECASE) for b in SUPPORTED_BRANDS)
     if not has_brand:
-        if re.match(r'^(AF-S|AF-P|AF|AI-S|AI|NIKKOR|PC-E|1 NIKKOR)', clean, re.IGNORECASE):
+        if re.match(r'^(AF-S|AF-P|AF|AI-S|AI|NIKKOR|PC-E|1 NIKKOR)\b', clean, re.IGNORECASE):
             clean = f"Nikon {clean}"
-        elif re.match(r'^(EF|EF-S|EF-M|RF|RF-S|TS-E|MP-E)', clean, re.IGNORECASE):
+        elif re.match(r'^(EF|EF-S|EF-M|RF|RF-S|TS-E|MP-E)\b', clean, re.IGNORECASE):
             clean = f"Canon {clean}"
 
     return clean.strip()
@@ -127,8 +128,8 @@ def format_brand_casing(name: str) -> str:
     if not name:
         return ""
     for brand in SUPPORTED_BRANDS:
-        if re.search(rf'{re.escape(brand)}', name, re.IGNORECASE):
-            name = re.sub(rf'{re.escape(brand)}', brand, name, flags=re.IGNORECASE)
+        if re.search(rf'\b{re.escape(brand)}\b', name, re.IGNORECASE):
+            name = re.sub(rf'\b{re.escape(brand)}\b', brand, name, flags=re.IGNORECASE)
     return name.strip()
 
 
@@ -157,7 +158,7 @@ def matches_focal_range(lens_str: str, focal_val: Optional[float]) -> bool:
         min_f, max_f = float(m.group(1)), float(m.group(2))
         if min_f > 0 and max_f >= min_f:
             return (min_f * 0.85) <= focal_val <= (max_f * 2.1)
-    m_prime = re.search(r'(\d+(?:\.\d+)?)\s*mm', lens_str, re.IGNORECASE)
+    m_prime = re.search(r'\b(\d+(?:\.\d+)?)\s*mm\b', lens_str, re.IGNORECASE)
     if m_prime:
         p_f = float(m_prime.group(1))
         if p_f > 0:
@@ -192,7 +193,7 @@ def get_accurate_lens_name(metadata: dict) -> str:
         val = get_tag_value(metadata, [xmp_key])
         if not is_invalid_lens_tag(val):
             val_str = str(val).strip()
-            if any(re.search(rf'{re.escape(b)}', val_str, re.IGNORECASE) for b in SUPPORTED_BRANDS):
+            if any(re.search(rf'\b{re.escape(b)}\b', val_str, re.IGNORECASE) for b in SUPPORTED_BRANDS):
                 if matches_focal_range(val_str, focal_val):
                     return normalize_lens_brand(val_str)
 
