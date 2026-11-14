@@ -1,4 +1,8 @@
-# Pro Lens & Camera Optical Sharpness & Quality Analytics API v2.1 (Render Safe-RAM Edition)
+# Pro Lens & Camera Optical Sharpness & Quality Analytics API v2.2.0
+# Developed by : Mr.Prasongjit Butsalee
+# Features: 1:1 Native Hybrid Sharpness (Laplacian + Tenengrad), Low-Key Normalization,
+#           Subject/Face Prior Saliency, Deep EXIF/MakerNotes & Render Safe-RAM Guard
+
 import os
 
 # จำกัดจำนวน Thread ของ NumPy / OpenBLAS / OpenCV เพื่อป้องกัน RAM แตกกระจายบน Render 512MB
@@ -33,23 +37,30 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# โหลด Haar Cascade สำหรับตรวจจับตำแหน่งใบหน้า/ตัวแบบ (น้ำหนักเบา ไม่เพิ่มภาระ RAM)
+try:
+    _cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    FACE_CASCADE = cv2.CascadeClassifier(_cascade_path) if os.path.exists(_cascade_path) else None
+except Exception:
+    FACE_CASCADE = None
+
 # ขีดจำกัดเพื่อป้องกันหน่วยความจำเต็ม (Render 512MB - 2GB RAM Safe Guard)
 MAX_FILE_SIZE_MB = 60
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 MAX_RECOMMENDED_BATCH = 10
 MAX_SESSION_ITEMS = 20
 
-# เพดานความละเอียดภาพใน RAM เพื่อป้องกัน OOM (HTTP 520)
-MAX_SOURCE_DIM = 2400   # ความละเอียดสูงสุดของภาพต้นฉบับสำหรับตัดครอป 100%
-MAX_WORK_DIM = 1500     # ความละเอียดสำหรับคำนวณความคมชัดและภาพพรีวิวเต็มเฟรม
+# เพดานความละเอียดภาพใน RAM
+MAX_NATIVE_DIM = 7680   # คงความละเอียด 1:1 เต็มพิกเซลสำหรับกล้อง 36-45MP (เช่น D810 7360x4912)
+MAX_WORK_DIM = 1600     # ความละเอียดสำหรับสแกนหาจุดโฟกัสเบื้องต้นและสร้างภาพพรีวิวเต็มเฟรม
 
-# ประมวลผลภาพทีละ 1 ไฟล์บนเซิร์ฟเวอร์ เพื่อป้องกัน Peak RAM พุ่งสูงเกินขีดจำกัดเมื่ออัปโหลดหลายไฟล์
+# ประมวลผลภาพทีละ 1 ไฟล์บนเซิร์ฟเวอร์ เพื่อป้องกัน Peak RAM พุ่งสูงเกินขีดจำกัด
 ANALYSIS_SEMAPHORE = asyncio.Semaphore(1)
 
 app = FastAPI(
     title="Pro Lens & Camera Optical Sharpness & Quality Analytics API",
-    version="2.1.1",
-    description="ระบบวิเคราะห์ความคมชัดเชิงแสง สอบเทียบจุดโฟกัส และประเมินคุณภาพภาพถ่ายอัตโนมัติ (RAW & JPEG)",
+    version="2.2.0",
+    description="ระบบวิเคราะห์ความคมชัดเชิงแสง 1:1 Native Resolution สอบเทียบจุดโฟกัส และประเมินคุณภาพภาพถ่ายอัตโนมัติ",
 )
 
 app.add_middleware(
@@ -60,15 +71,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ฐานข้อมูลแบรนด์และรุ่นกล้องที่รองรับ
 SUPPORTED_BRANDS = ["Nikon", "Canon", "Sigma", "Tamron", "Samyang", "Tokina", "Sony", "Fujifilm"]
-SUPPORTED_MODELS = [
-    "NIKON D810",
-    "NIKON D850",
-    "NIKON D750",
-    "Canon EOS 5D Mark IV",
-    "Canon EOS 6D Mark II",
-]
 
 
 def get_tag_value(metadata: dict, candidate_keys: List[str]):
@@ -354,7 +357,6 @@ def extract_deep_makernotes(metadata: dict) -> dict:
     roll_val = parse_float(roll_raw)
     pitch_val = parse_float(pitch_raw)
 
-    # รวบรวม Tag ทั้งหมดที่อ่านได้ (ข้าม Binary Blob ขนาดใหญ่เพื่อรักษาขนาด JSON)
     all_tags = {}
     for k, v in metadata.items():
         if k.startswith("SourceFile") or k.startswith("System:"):
@@ -380,12 +382,12 @@ def extract_deep_makernotes(metadata: dict) -> dict:
     }
 
 
-def _cap_source_image_ram(img: np.ndarray) -> Tuple[np.ndarray, int, int]:
-    """เก็บค่าความละเอียดต้นฉบับจริง แล้วลดขนาดบัฟเฟอร์ภาพใน RAM ลงไม่เกิน MAX_SOURCE_DIM"""
+def _cap_native_image_ram(img: np.ndarray) -> Tuple[np.ndarray, int, int]:
+    """เก็บค่าความละเอียดจริง และคงพิกเซลต้นฉบับ 1:1 ไว้สูงสุดถึง MAX_NATIVE_DIM (7680px)"""
     true_h, true_w = img.shape[:2]
     max_side = max(true_h, true_w)
-    if max_side > MAX_SOURCE_DIM:
-        s = MAX_SOURCE_DIM / float(max_side)
+    if max_side > MAX_NATIVE_DIM:
+        s = MAX_NATIVE_DIM / float(max_side)
         resized = cv2.resize(img, (int(true_w * s), int(true_h * s)), interpolation=cv2.INTER_AREA)
         del img
         gc.collect()
@@ -394,10 +396,10 @@ def _cap_source_image_ram(img: np.ndarray) -> Tuple[np.ndarray, int, int]:
 
 
 def load_image_robust(file_path: str) -> Tuple[np.ndarray, int, int]:
-    """อ่านไฟล์ภาพปกติและไฟล์ RAW พร้อมควบคุมขนาดบัฟเฟอร์ใน RAM ไม่ให้เกินขีดจำกัด"""
+    """อ่านไฟล์ภาพปกติและไฟล์ RAW พร้อมควบคุมเพดานหน่วยความจำ"""
     img = cv2.imread(file_path)
     if img is not None:
-        return _cap_source_image_ram(img)
+        return _cap_native_image_ram(img)
 
     try:
         for tag in ["-JpgFromRaw", "-PreviewImage", "-ThumbnailImage"]:
@@ -409,7 +411,7 @@ def load_image_robust(file_path: str) -> Tuple[np.ndarray, int, int]:
                 del nparr, res
                 gc.collect()
                 if decoded is not None:
-                    return _cap_source_image_ram(decoded)
+                    return _cap_native_image_ram(decoded)
     except Exception as e:
         logger.error(f"RAW Preview Extraction Failed: {e}")
 
@@ -493,16 +495,101 @@ def parse_camera_af_point(metadata: dict, img_w: int, img_h: int) -> Tuple[str, 
 
 
 def compute_patch_sharpness(gray_img: np.ndarray, cx: int, cy: int, half_size: int) -> float:
-    """คำนวณค่าความคมชัดเชิงแสง (Laplacian Variance) ในกรอบพื้นที่ที่กำหนด"""
+    """คำนวณค่าความคมชัดเบื้องต้นสำหรับสแกนหา Candidate บนภาพทำงาน"""
     h, w = gray_img.shape
     x1 = max(0, cx - half_size)
     x2 = min(w, cx + half_size)
     y1 = max(0, cy - half_size)
     y2 = min(h, cy + half_size)
     patch = gray_img[y1:y2, x1:x2]
-    if patch.size < 100:
+    if patch.size < 64:
         return 0.0
-    return float(cv2.Laplacian(patch, cv2.CV_64F).var())
+    lap = cv2.Laplacian(patch, cv2.CV_32F)
+    cap = float(np.percentile(np.abs(lap), 99.5))
+    if cap > 0:
+        lap = np.clip(lap, -cap, cap)
+    return float(np.var(lap))
+
+
+def compute_native_sharpness(
+    orig_gray: np.ndarray,
+    norm_x: float,
+    norm_y: float,
+    iso_num: float = 100.0,
+) -> float:
+    """
+    วัดความคมชัดเชิงแสงแบบ 1:1 Native Resolution จากพิกเซลภาพต้นฉบับจริง:
+    1. ผสาน Laplacian Variance (60%) + Tenengrad Sobel Energy (40%)
+    2. ตัดยอด Specular Highlight Outliers ที่ 99.5 Percentile เพื่อไม่ให้แสงสะท้อนโลหะดึงพิกัดเพี้ยน
+    3. ชดเชยแสง Low-Key (ภาพกลางคืน/เวที) และระดับ ISO ให้เทียบเกณฑ์มาตรฐานเดียวกัน
+    """
+    oh, ow = orig_gray.shape
+    cx = int(np.clip(norm_x, 0.02, 0.98) * ow)
+    cy = int(np.clip(norm_y, 0.02, 0.98) * oh)
+
+    # ใช้กรอบขนาดละเอียดเฉพาะจุด (~1/32 ของด้านสั้น เช่น ~153px บนภาพ 4912px)
+    half_native = max(28, min(ow, oh) // 32)
+    x1, x2 = max(0, cx - half_native), min(ow, cx + half_native)
+    y1, y2 = max(0, cy - half_native), min(oh, cy + half_native)
+
+    patch = orig_gray[y1:y2, x1:x2].astype(np.float32)
+    if patch.size < 64:
+        return 0.0
+
+    # ลด Noise เฉพาะกรณี ISO สูง เพื่อรักษา Micro-Contrast ระดับพิกเซลในภาพ ISO ต่ำ
+    if iso_num > 800:
+        sigma = min(1.4, 0.5 + (iso_num - 800.0) / 3200.0)
+        patch_eval = cv2.GaussianBlur(patch, (3, 3), sigma)
+    else:
+        patch_eval = patch
+
+    # 1. Clipped Laplacian Variance
+    lap = cv2.Laplacian(patch_eval, cv2.CV_32F)
+    cap_lap = float(np.percentile(np.abs(lap), 99.5))
+    if cap_lap > 0:
+        lap = np.clip(lap, -cap_lap, cap_lap)
+    raw_lap = float(np.var(lap))
+
+    # 2. Clipped Tenengrad (Sobel Gradient Energy - จับรายละเอียดใบหน้า ดวงตา และลวดลายได้แม่นยำ)
+    gx = cv2.Sobel(patch_eval, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(patch_eval, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = np.hypot(gx, gy)
+    cap_grad = float(np.percentile(grad_mag, 99.5))
+    if cap_grad > 0:
+        grad_mag = np.minimum(grad_mag, cap_grad)
+    tenengrad = float(np.mean(grad_mag ** 2))
+
+    # 3. Low-Key Luminance & ISO Normalization
+    mean_lum = max(28.0, float(np.mean(patch)))
+    lum_gain = float(np.clip((118.0 / mean_lum) ** 1.15, 0.75, 3.2))
+    iso_penalty = 1.0 + max(0.0, (iso_num - 200.0) / 2000.0)
+
+    hybrid_raw = (0.60 * raw_lap) + (0.40 * (tenengrad * 0.18))
+    return round((hybrid_raw * lum_gain) / iso_penalty, 2)
+
+
+def detect_subject_saliency_map(gray_work: np.ndarray) -> List[Tuple[float, float, float]]:
+    """ตรวจจับตำแหน่งตัวแบบ/ใบหน้า (Normalized cx, cy, weight) เพื่อจัดลำดับความสำคัญของจุดโฟกัส"""
+    h, w = gray_work.shape
+    subjects = []
+    if FACE_CASCADE is not None and not FACE_CASCADE.empty():
+        try:
+            min_face = max(22, min(w, h) // 36)
+            faces = FACE_CASCADE.detectMultiScale(
+                gray_work,
+                scaleFactor=1.1,
+                minNeighbors=4,
+                minSize=(min_face, min_face),
+            )
+            for (fx, fy, fw, fh) in faces:
+                ncx = (fx + fw * 0.5) / w
+                ncy = (fy + fh * 0.5) / h
+                center_dist = math.hypot(ncx - 0.5, ncy - 0.45)
+                weight = 1.28 - min(0.18, center_dist * 0.4)
+                subjects.append((ncx, ncy, weight))
+        except Exception as e:
+            logger.debug(f"Face saliency skipped: {e}")
+    return subjects
 
 
 def describe_offset_direction(dx: int, dy: int, diag: float) -> str:
@@ -533,7 +620,7 @@ def extract_highres_crop_b64(
     orig_h, orig_w = orig_img.shape[:2]
     orig_cx = int(center_x_work / scale)
     orig_cy = int(center_y_work / scale)
-    orig_half = max(200, min(orig_w, orig_h) // 6)
+    orig_half = max(220, min(orig_w, orig_h) // 8)
 
     x1 = max(0, orig_cx - orig_half)
     x2 = min(orig_w, orig_cx + orig_half)
@@ -656,14 +743,14 @@ def evaluate_photo_quality(
     focal_val: Optional[float],
     roll_angle: Optional[float],
 ) -> dict:
-    """ระบบให้คะแนนคุณภาพภาพถ่ายแบบถ่วงน้ำหนัก (Composite Quality Scoring) และจำแนกสาเหตุภาพเสีย"""
+    """ระบบให้คะแนนคุณภาพภาพถ่ายแบบถ่วงน้ำหนัก (Calibrated for 1:1 Native Hybrid Sharpness)"""
 
-    # 1. Focus & Sharpness Index (น้ำหนัก 50%)
-    base_focus_score = min(100.0, (af_sharpness / 1250.0) * 85.0 + (15.0 if af_sharpness >= 1250 else 0.0))
-    if af_sharpness >= 600:
-        base_focus_score = max(base_focus_score, min(96.0, 68.0 + ((af_sharpness - 600.0) / 800.0) * 28.0))
+    # 1. Focus & Sharpness Index (น้ำหนัก 50%) — สเกลมาตรฐาน 1:1 Native Resolution
+    base_focus_score = min(100.0, (af_sharpness / 1800.0) * 85.0 + (15.0 if af_sharpness >= 1800 else 0.0))
+    if af_sharpness >= 750:
+        base_focus_score = max(base_focus_score, min(97.0, 72.0 + ((af_sharpness - 750.0) / 1200.0) * 25.0))
 
-    if edge_density_pct < 6.0 and 250 <= af_sharpness < 750:
+    if edge_density_pct < 6.0 and 350 <= af_sharpness < 950:
         base_focus_score = min(100.0, base_focus_score + 12.0)
 
     if focus_offset_pct > 6.0 and sharpness_ratio_pct < 85.0:
@@ -674,15 +761,15 @@ def evaluate_photo_quality(
 
     # 2. Contrast & Exposure Index (น้ำหนัก 30%)
     contrast_score = 100.0
-    if contrast_std < 35.0:
-        contrast_score -= (35.0 - contrast_std) * 1.4
-    elif contrast_std > 82.0:
-        contrast_score -= (contrast_std - 82.0) * 0.8
+    if contrast_std < 30.0:
+        contrast_score -= (30.0 - contrast_std) * 1.3
+    elif contrast_std > 84.0:
+        contrast_score -= (contrast_std - 84.0) * 0.8
 
     if highlight_clipping_pct > 3.0:
         contrast_score -= min(35.0, (highlight_clipping_pct - 3.0) * 2.5)
-    if shadow_crushing_pct > 8.0:
-        contrast_score -= min(25.0, (shadow_crushing_pct - 8.0) * 1.2)
+    if shadow_crushing_pct > 15.0:
+        contrast_score -= min(22.0, (shadow_crushing_pct - 15.0) * 0.9)
 
     contrast_exposure_index = round(max(0.0, min(100.0, contrast_score)), 1)
 
@@ -697,8 +784,8 @@ def evaluate_photo_quality(
             shutter_risk = True
             ratio_slow = exposure_sec / safe_sec
             raw_pen = min(35.0, math.log2(max(1.0, ratio_slow)) * 12.0)
-            if af_sharpness >= 850:
-                raw_pen *= 0.3
+            if af_sharpness >= 1100:
+                raw_pen *= 0.25
             stability_score -= raw_pen
 
     if iso_num > 400:
@@ -733,7 +820,7 @@ def evaluate_photo_quality(
 
     # จำแนกสาเหตุข้อบกพร่อง (Issue Classification)
     issues = []
-    if peak_sharpness < 350 and af_sharpness < 350:
+    if peak_sharpness < 450 and af_sharpness < 450:
         if shutter_risk:
             issues.append("💨 ภาพสั่นไหว (Motion Blur / Shutter ช้ากว่าทางยาวโฟกัส)")
         else:
@@ -745,9 +832,9 @@ def evaluate_photo_quality(
         issues.append(f"📶 สัญญาณรบกวนสูง (ISO {int(iso_num)})")
     if highlight_clipping_pct > 5.0:
         issues.append(f"☀️ แสงจ้าทะลุ (Highlight Clipping {highlight_clipping_pct}%)")
-    if shadow_crushing_pct > 12.0:
+    if shadow_crushing_pct > 25.0:
         issues.append(f"🌑 เงามืดจม (Shadow Crushing {shadow_crushing_pct}%)")
-    if contrast_std < 30.0:
+    if contrast_std < 26.0:
         issues.append(f"🌫️ คอนทราสต์ต่ำ/ภาพแบน (Contrast {contrast_std})")
     if roll_angle is not None and abs(roll_angle) > 4.0:
         issues.append(f"📐 ระนาบกล้องเอียง ({roll_angle}°)")
@@ -869,13 +956,21 @@ def extract_exif_data(file_path: str) -> dict:
 
 
 def process_image_and_sharpness(file_path: str, exif_info: dict):
-    """วิเคราะห์ความคมชัดเชิงแสงทั้งภาพ เปรียบเทียบจุดโฟกัส วิเคราะห์ Edge/Histogram และคืน RAM ทีละขั้น"""
+    """
+    วิเคราะห์ความคมชัดเชิงแสงแบบ 1:1 Native Resolution:
+    - สแกนหาจุด Candidate บน work_img (1600px) ด้วย Subject/Face Saliency Weighting
+    - วัดคะแนนความคมชัดจริงจากพิกเซลต้นฉบับ 1:1 (orig_gray) พร้อมชดเชยแสง Low-Key
+    - คืนหน่วยความจำ RAM ทันทีหลังจบแต่ละขั้นตอน
+    """
     metadata = exif_info["metadata"]
     iso_val = exif_info["iso"]
     orig_img, true_orig_w, true_orig_h = load_image_robust(file_path)
     orig_h, orig_w = orig_img.shape[:2]
 
-    # ลดขนาดภาพทำงานเป็น MAX_WORK_DIM (1500px) เพื่อประหยัด RAM บน Render
+    # แปลงภาพต้นฉบับเป็น Grayscale 1 ช่องสีสำหรับวัดความคมชัด 1:1 (ใช้ RAM น้อยกว่า RGB 3 เท่า)
+    orig_gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
+
+    # สร้างภาพทำงานขนาด 1600px สำหรับสแกนหาพิกัดและวาดพรีวิวเต็มเฟรม
     if max(orig_h, orig_w) > MAX_WORK_DIM:
         scale = MAX_WORK_DIM / float(max(orig_h, orig_w))
         work_img = cv2.resize(orig_img, (int(orig_w * scale), int(orig_h * scale)), interpolation=cv2.INTER_AREA)
@@ -885,68 +980,96 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
 
     h, w = work_img.shape[:2]
     gray = cv2.cvtColor(work_img, cv2.COLOR_BGR2GRAY)
-    denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    # 1. อ่านพิกัดจุดโฟกัสจากกล้อง (Camera AF Point)
-    af_point_text, af_cx, af_cy = parse_camera_af_point(metadata, w, h)
-    half_box = max(32, min(w, h) // 10)
 
     try:
         iso_num = float(parse_float(iso_val) or 100.0)
     except Exception:
         iso_num = 100.0
-    noise_penalty = 1.0 + max(0.0, (iso_num - 100.0) / 1600.0)
 
-    raw_af_sharpness = compute_patch_sharpness(denoised_gray, af_cx, af_cy, half_box)
-    af_sharpness = round(raw_af_sharpness / noise_penalty, 2)
+    # กรอง Noise เฉพาะกรณี ISO สูงสำหรับขั้นตอนสแกนเบื้องต้น
+    if iso_num > 800:
+        denoised_gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    else:
+        denoised_gray = gray
 
-    # 2. ค้นหาจุดที่มีความคมชัดที่สุดในบริเวณใกล้จุดโฟกัสกล้องก่อน
-    local_rad = max(half_box, min(w, h) // 6)
-    local_best_x, local_best_y = af_cx, af_cy
-    local_best_raw = raw_af_sharpness
-    step_local = max(6, local_rad // 8)
-    for y in range(max(half_box, af_cy - local_rad), min(h - half_box, af_cy + local_rad) + 1, step_local):
-        for x in range(max(half_box, af_cx - local_rad), min(w - half_box, af_cx + local_rad) + 1, step_local):
-            val = compute_patch_sharpness(denoised_gray, x, y, half_box)
-            if val > local_best_raw:
-                local_best_raw = val
-                local_best_x, local_best_y = x, y
+    # 1. อ่านพิกัดจุดโฟกัสจากกล้อง (Camera AF Point)
+    af_point_text, af_cx, af_cy = parse_camera_af_point(metadata, w, h)
 
-    # 3. ค้นหาจุดที่มีความคมชัดที่สุดทั่วทั้งภาพ (Global Optical Sharpness Search)
-    margin_x = max(half_box, int(w * 0.04))
-    margin_y = max(half_box, int(h * 0.04))
-    step_global = max(12, half_box // 2)
+    # แยกขนาดกรอบเป็น 2 ระดับ: กรอบละเอียดสำหรับสแกนหาจุดโฟกัส และกรอบแสดงผลบนภาพ
+    fine_half = max(20, min(w, h) // 32)
+    display_half = max(34, min(w, h) // 14)
 
-    global_best_x, global_best_y = local_best_x, local_best_y
-    global_best_raw = local_best_raw
+    # ตรวจจับตำแหน่งใบหน้า/ตัวแบบเพื่อให้น้ำหนักความสำคัญในจุดโฟกัสหลัก
+    subject_priors = detect_subject_saliency_map(gray)
 
+    def subject_weight_at(px: int, py: int) -> float:
+        nx, ny = px / w, py / h
+        best_w = 1.0
+        for sx, sy, sw in subject_priors:
+            d = math.hypot(nx - sx, ny - sy)
+            if d < 0.08:
+                w_cand = 1.0 + (sw - 1.0) * (1.0 - d / 0.08)
+                best_w = max(best_w, w_cand)
+        return best_w
+
+    # 2. สแกนหยาบทั่วภาพบน work_img พร้อมถ่วงน้ำหนักตัวแบบ (Subject-Aware Grid Search)
+    margin_x = max(fine_half, int(w * 0.05))
+    margin_y = max(fine_half, int(h * 0.05))
+    step_global = max(10, fine_half // 2)
+
+    candidates = []
     for y in range(margin_y, max(margin_y + 1, h - margin_y), step_global):
         for x in range(margin_x, max(margin_x + 1, w - margin_x), step_global):
-            val = compute_patch_sharpness(denoised_gray, x, y, half_box)
-            if val > global_best_raw:
-                global_best_raw = val
-                global_best_x, global_best_y = x, y
+            raw_val = compute_patch_sharpness(denoised_gray, x, y, fine_half)
+            weighted_val = raw_val * subject_weight_at(x, y)
+            candidates.append((weighted_val, x, y))
 
-    fine_rad = step_global
-    fine_step = max(3, fine_rad // 4)
-    for y in range(max(half_box, global_best_y - fine_rad), min(h - half_box, global_best_y + fine_rad) + 1, fine_step):
-        for x in range(max(half_box, global_best_x - fine_rad), min(w - half_box, global_best_x + fine_rad) + 1, fine_step):
-            val = compute_patch_sharpness(denoised_gray, x, y, half_box)
-            if val > global_best_raw:
-                global_best_raw = val
-                global_best_x, global_best_y = x, y
+    # เพิ่มโซนรอบจุดโฟกัสกล้องเข้าในรายการตรวจสอบเสมอ
+    candidates.append((compute_patch_sharpness(denoised_gray, af_cx, af_cy, fine_half) * 1.15, af_cx, af_cy))
+    candidates.sort(key=lambda item: item[0], reverse=True)
 
-    if local_best_raw >= global_best_raw * 0.88:
-        peak_cx, peak_cy = local_best_x, local_best_y
-        peak_raw = local_best_raw
-    else:
-        peak_cx, peak_cy = global_best_x, global_best_y
-        peak_raw = global_best_raw
+    # คัด Top 5 โซนที่แยกจากกันอย่างชัดเจนเพื่อนำไปวัดละเอียดระดับ 1:1 บน orig_gray
+    top_distinct = []
+    for w_val, cx, cy in candidates:
+        if all(math.hypot(cx - px, cy - py) >= fine_half * 1.5 for _, px, py in top_distinct):
+            top_distinct.append((w_val, cx, cy))
+        if len(top_distinct) >= 5:
+            break
 
-    peak_sharpness = round(peak_raw / noise_penalty, 2)
+    # 3. คำนวณความคมชัดระดับ 1:1 Native Resolution ณ จุดโฟกัสกล้องและแต่ละโซน Candidate
+    af_sharpness = compute_native_sharpness(orig_gray, af_cx / w, af_cy / h, iso_num)
 
-    # ลบ denoised_gray ทันทีหลังคำนวณความคมชัดเสร็จ
-    del denoised_gray
+    best_weighted_native = -1.0
+    peak_cx, peak_cy = af_cx, af_cy
+    peak_sharpness = af_sharpness
+
+    fine_step = max(3, step_global // 3)
+    for _, cx, cy in top_distinct:
+        local_best_x, local_best_y = cx, cy
+        local_best_raw = -1.0
+        for fy in range(max(fine_half, cy - step_global), min(h - fine_half, cy + step_global) + 1, fine_step):
+            for fx in range(max(fine_half, cx - step_global), min(w - fine_half, cx + step_global) + 1, fine_step):
+                v = compute_patch_sharpness(denoised_gray, fx, fy, fine_half)
+                if v > local_best_raw:
+                    local_best_raw = v
+                    local_best_x, local_best_y = fx, fy
+
+        native_score = compute_native_sharpness(orig_gray, local_best_x / w, local_best_y / h, iso_num)
+        weighted_native = native_score * subject_weight_at(local_best_x, local_best_y)
+        if weighted_native > best_weighted_native:
+            best_weighted_native = weighted_native
+            peak_cx, peak_cy = local_best_x, local_best_y
+            peak_sharpness = native_score
+
+    # หากจุด AF ของกล้องมีความคมชัดสูงใกล้เคียงจุดสูงสุด (>= 90%) ให้ยึดพิกัดกล้องเป็นหลัก
+    if af_sharpness >= peak_sharpness * 0.90:
+        peak_cx, peak_cy = af_cx, af_cy
+        peak_sharpness = af_sharpness
+
+    # คืน RAM ของ orig_gray และ denoised_gray ทันที
+    del orig_gray
+    if denoised_gray is not gray:
+        del denoised_gray
 
     # 4. คำนวณระยะห่างและเปรียบเทียบระหว่างจุดโฟกัสกล้องกับจุดที่คมชัดที่สุด
     diag = math.hypot(w, h)
@@ -965,7 +1088,7 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
     af_coords_text = f"X:{round(af_norm_x)}%, Y:{round(af_norm_y)}%"
     peak_coords_text = f"X:{round(peak_norm_x)}%, Y:{round(peak_norm_y)}%"
 
-    if peak_sharpness < 350 and af_sharpness < 350:
+    if peak_sharpness < 450 and af_sharpness < 450:
         quality = "🔴 ซอฟต์ / เบลอทั้งภาพ"
         focus_status = "ไม่พบจุดคมชัดสูงในภาพ"
         advice = (
@@ -973,13 +1096,13 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
             f"| อาจเกิดจากความเร็วชัตเตอร์ต่ำ กล้องสั่นไหว หรือหลุดระยะโฟกัสทั้งเฟรม"
         )
     elif focus_offset_pct <= 6.0 or sharpness_ratio_pct >= 85.0:
-        if af_sharpness >= 1000:
+        if af_sharpness >= 1400:
             quality = "🟢 โฟกัสเข้าเป้า & คมชัดสูงมาก"
         else:
             quality = "🟡 โฟกัสเข้าเป้า (คมชัดปานกลาง)"
         focus_status = f"เข้าเป้าแม่นยำ (คลาดเคลื่อน {focus_offset_pct}%)"
         advice = (
-            f"จุดชัดที่สุดตรงกับพิกัดกล้อง ({af_point_text}) | ความคมชัดจุดกล้อง {af_sharpness} "
+            f"จุดชัดที่สุดตรงกับพิกัดกล้อง ({af_point_text}) | ความคมชัด 1:1 จุดกล้อง {af_sharpness} "
             f"(คิดเป็น {sharpness_ratio_pct}% ของจุดสูงสุด {peak_sharpness})"
         )
     else:
@@ -991,7 +1114,7 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
         )
 
     # 5. วิเคราะห์ Edge Density, Contrast และ RGB Histogram
-    texture_metrics = compute_texture_and_histogram(orig_img, work_img, gray, af_cx, af_cy, half_box, scale)
+    texture_metrics = compute_texture_and_histogram(orig_img, work_img, gray, af_cx, af_cy, display_half, scale)
     del gray
 
     # 6. คำนวณคะแนนคุณภาพรวม (Composite Quality Score)
@@ -1010,53 +1133,53 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
         roll_angle=exif_info["deep_notes"].get("roll_angle"),
     )
 
-    # 7. สร้างภาพครอปความละเอียดสูง (640px Quality 88 เพื่อประหยัด RAM และ Payload)
+    # 7. สร้างภาพครอป 100% ความละเอียดสูงจาก orig_img
     sharpest_crop_b64 = extract_highres_crop_b64(orig_img, peak_cx, peak_cy, scale, max_crop_px=640, jpeg_quality=88)
     af_crop_b64 = extract_highres_crop_b64(orig_img, af_cx, af_cy, scale, max_crop_px=640, jpeg_quality=88)
 
-    # คืน RAM ของภาพต้นฉบับทันทีหลังตัดครอปเสร็จ ก่อนเข้ารหัสภาพเต็มเฟรม
+    # คืน RAM ของภาพต้นฉบับขนาดใหญ่ทันทีหลังตัดภาพครอปเสร็จ
     del orig_img
     gc.collect()
 
     # 8. สร้างภาพเต็มเฟรมแบบสะอาด (Clean Preview) สำหรับเครื่องมือครอปในหน้าเว็บ
-    _, clean_buf = cv2.imencode(".jpg", work_img, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
+    _, clean_buf = cv2.imencode(".jpg", work_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     clean_preview_b64 = f"data:image/jpeg;base64,{base64.b64encode(clean_buf).decode('utf-8')}"
     del clean_buf
 
     # 9. วาดกรอบเปรียบเทียบลงบนภาพเต็ม (พิกัดจุดโฟกัสกล้อง vs พิกัดจุดที่คมชัดที่สุด)
     annotated_img = work_img
-    thickness = max(2, int(min(w, h) / 400))
+    thickness = max(2, int(min(w, h) / 420))
 
     af_color = (255, 120, 0)
-    ax1, ax2 = max(0, af_cx - half_box), min(w, af_cx + half_box)
-    ay1, ay2 = max(0, af_cy - half_box), min(h, af_cy + half_box)
+    ax1, ax2 = max(0, af_cx - display_half), min(w, af_cx + display_half)
+    ay1, ay2 = max(0, af_cy - display_half), min(h, af_cy + display_half)
     cv2.rectangle(annotated_img, (ax1, ay1), (ax2, ay2), af_color, thickness)
     cv2.drawMarker(
         annotated_img,
         (af_cx, af_cy),
         af_color,
         markerType=cv2.MARKER_CROSS,
-        markerSize=26,
+        markerSize=24,
         thickness=thickness + 1,
     )
 
     if dist_px > 12:
         cv2.line(annotated_img, (af_cx, af_cy), (peak_cx, peak_cy), (0, 220, 255), thickness)
 
-    peak_color = (0, 220, 0) if (focus_offset_pct <= 6.0 or sharpness_ratio_pct >= 85.0) and peak_sharpness >= 350 else (0, 60, 255)
-    px1, px2 = max(0, peak_cx - half_box), min(w, peak_cx + half_box)
-    py1, py2 = max(0, peak_cy - half_box), min(h, peak_cy + half_box)
+    peak_color = (0, 220, 0) if (focus_offset_pct <= 6.0 or sharpness_ratio_pct >= 85.0) and peak_sharpness >= 450 else (0, 60, 255)
+    px1, px2 = max(0, peak_cx - display_half), min(w, peak_cx + display_half)
+    py1, py2 = max(0, peak_cy - display_half), min(h, peak_cy + display_half)
     cv2.rectangle(annotated_img, (px1, py1), (px2, py2), peak_color, thickness + 1)
     cv2.drawMarker(
         annotated_img,
         (peak_cx, peak_cy),
         peak_color,
         markerType=cv2.MARKER_STAR,
-        markerSize=28,
+        markerSize=26,
         thickness=thickness + 1,
     )
 
-    _, buffer = cv2.imencode(".jpg", annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
+    _, buffer = cv2.imencode(".jpg", annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
     del buffer, annotated_img
     gc.collect()
@@ -1091,34 +1214,42 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
 async def read_index():
     if os.path.exists("index.html"):
         return FileResponse("index.html")
-    return HTMLResponse("<h1>Pro Lens & Camera Optical Sharpness API v2.1 Running</h1>")
+    return HTMLResponse("<h1>Pro Lens & Camera Optical Sharpness API v2.2.0 Running</h1>")
 
 
 @app.get("/api/v1/health")
 async def health_check():
     return {
         "status": "ok",
-        "version": "2.1.1",
+        "version": "2.2.0",
+        "developer": "Mr.Prasongjit Butsalee",
         "limits": {
             "max_file_size_mb": MAX_FILE_SIZE_MB,
             "recommended_batch_files": MAX_RECOMMENDED_BATCH,
             "max_session_items": MAX_SESSION_ITEMS,
-            "max_source_dim": MAX_SOURCE_DIM,
+            "max_native_dim": MAX_NATIVE_DIM,
             "max_work_dim": MAX_WORK_DIM,
         },
-        "modules": ["AF_Calibration", "Quality_Scoring", "Edge_Histogram", "Statistical_Insights"],
+        "modules": [
+            "Native_1to1_Hybrid_Sharpness",
+            "Subject_Face_Saliency",
+            "AF_Calibration",
+            "Quality_Scoring",
+            "Edge_Histogram",
+            "Statistical_Insights",
+        ],
     }
 
 
 async def _save_upload_with_limit(file: UploadFile) -> str:
-    """บันทึกไฟล์อัปโหลดลงดิสก์ชั่วคราวแบบแบ่งก้อน (Chunked) และตรวจสอบขนาดไม่ให้เกินขีดจำกัด RAM/Disk"""
+    """บันทึกไฟล์อัปโหลดลงดิสก์ชั่วคราวแบบแบ่งก้อน (Chunked) และตรวจสอบขนาดไม่ให้เกินขีดจำกัด"""
     ext = os.path.splitext(file.filename or "")[1]
     total_bytes = 0
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         temp_path = tmp.name
         try:
             while True:
-                chunk = await file.read(1024 * 1024)  # อ่านทีละ 1 MB
+                chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
                 total_bytes += len(chunk)
