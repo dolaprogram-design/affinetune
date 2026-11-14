@@ -1,9 +1,6 @@
 fastapi
 uvicorn
-piexif
-Pillow
+python-multipart
 opencv-python-headless
 numpy
-pandas
-matplotlib
-python-multipart
+PyExifTool
