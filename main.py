@@ -1,11 +1,17 @@
-# Pro Lens & Camera Optical Sharpness & Quality Analytics API v2.2 (Production Ready)
+# Pro Lens & Camera Optical Sharpness & Quality Analytics API v2.1 (Render Safe-RAM Edition)
 import os
+
+# จำกัดจำนวน Thread ของ NumPy / OpenBLAS / OpenCV เพื่อป้องกัน RAM แตกกระจายบน Render 512MB
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import re
 import gc
 import json
 import math
 import asyncio
-import shutil
 import tempfile
 import base64
 import logging
@@ -16,6 +22,8 @@ from typing import Optional, Tuple, List
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+cv2.setNumThreads(1)
 
 try:
     from exiftool import ExifToolHelper
@@ -31,12 +39,16 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 MAX_RECOMMENDED_BATCH = 10
 MAX_SESSION_ITEMS = 20
 
+# เพดานความละเอียดภาพใน RAM เพื่อป้องกัน OOM (HTTP 520)
+MAX_SOURCE_DIM = 2400   # ความละเอียดสูงสุดของภาพต้นฉบับสำหรับตัดครอป 100%
+MAX_WORK_DIM = 1500     # ความละเอียดสำหรับคำนวณความคมชัดและภาพพรีวิวเต็มเฟรม
+
 # ประมวลผลภาพทีละ 1 ไฟล์บนเซิร์ฟเวอร์ เพื่อป้องกัน Peak RAM พุ่งสูงเกินขีดจำกัดเมื่ออัปโหลดหลายไฟล์
 ANALYSIS_SEMAPHORE = asyncio.Semaphore(1)
 
 app = FastAPI(
     title="Pro Lens & Camera Optical Sharpness & Quality Analytics API",
-    version="2.2.0",
+    version="2.1.1",
     description="ระบบวิเคราะห์ความคมชัดเชิงแสง สอบเทียบจุดโฟกัส และประเมินคุณภาพภาพถ่ายอัตโนมัติ (RAW & JPEG)",
 )
 
@@ -209,11 +221,11 @@ def get_accurate_lens_name(metadata: dict) -> str:
 
     tag_candidates = [
         get_tag_value(metadata, ["Composite:LensID", "LensID"]),
-        get_tag_value(metadata, ["MakerNotes:LensID", "Nikon:LensID", "Canon:LensID"]),
+        get_tag_value(metadata, ["MakerNotes:LensID"]),
         get_tag_value(metadata, ["EXIF:LensModel", "LensModel"]),
         get_tag_value(metadata, ["XMP:Lens"]),
         get_tag_value(metadata, ["Composite:LensSpec"]),
-        get_tag_value(metadata, ["MakerNotes:Lens", "Nikon:Lens", "EXIF:Lens"]),
+        get_tag_value(metadata, ["MakerNotes:Lens", "EXIF:Lens"]),
     ]
 
     for cand in tag_candidates:
@@ -222,10 +234,10 @@ def get_accurate_lens_name(metadata: dict) -> str:
             if matches_focal_range(cand_str, focal_val):
                 return normalize_lens_brand(cand_str)
 
-    min_f = parse_float(get_tag_value(metadata, ["MakerNotes:MinFocalLength", "Nikon:MinFocalLength", "MinFocalLength"]))
-    max_f = parse_float(get_tag_value(metadata, ["MakerNotes:MaxFocalLength", "Nikon:MaxFocalLength", "MaxFocalLength"]))
-    min_a = parse_float(get_tag_value(metadata, ["MakerNotes:MaxApertureAtMinFocal", "Nikon:MaxApertureAtMinFocal", "MaxApertureAtMinFocal"]))
-    max_a = parse_float(get_tag_value(metadata, ["MakerNotes:MaxApertureAtMaxFocal", "Nikon:MaxApertureAtMaxFocal", "MaxApertureAtMaxFocal"]))
+    min_f = parse_float(get_tag_value(metadata, ["MakerNotes:MinFocalLength", "MinFocalLength"]))
+    max_f = parse_float(get_tag_value(metadata, ["MakerNotes:MaxFocalLength", "MaxFocalLength"]))
+    min_a = parse_float(get_tag_value(metadata, ["MakerNotes:MaxApertureAtMinFocal", "MaxApertureAtMinFocal"]))
+    max_a = parse_float(get_tag_value(metadata, ["MakerNotes:MaxApertureAtMaxFocal", "MaxApertureAtMaxFocal"]))
 
     if not (min_f and max_f):
         lens_info = get_tag_value(metadata, ["EXIF:LensInfo", "LensInfo"])
@@ -251,7 +263,7 @@ def get_accurate_lens_name(metadata: dict) -> str:
             )
         elif min_a and min_a > 0:
             a_str = f" f/{format_num_clean(min_a)}"
-        lens_type = str(get_tag_value(metadata, ["MakerNotes:LensType", "Nikon:LensType"]) or "").strip()
+        lens_type = str(get_tag_value(metadata, ["MakerNotes:LensType"]) or "").strip()
         type_suffix = f" ({lens_type})" if lens_type and lens_type.lower() not in ("n/a", "none") else ""
         return f"Lens {f_str}{a_str}{type_suffix}".strip()
 
@@ -275,10 +287,16 @@ def extract_af_fine_tune(metadata: dict) -> str:
         "AFFineTuneAdj",
         "AFTuneValue",
     ])
+    af_adj_tele = get_tag_value(metadata, [
+        "MakerNotes:AFFineTuneAdjTele",
+        "Nikon:AFFineTuneAdjTele",
+        "AFFineTuneAdjTele",
+    ])
     af_index = get_tag_value(metadata, ["MakerNotes:AFFineTuneIndex", "Nikon:AFFineTuneIndex", "AFFineTuneIndex"])
 
     canon_mode = get_tag_value(metadata, ["MakerNotes:AFMicroAdjMode", "Canon:AFMicroAdjMode", "AFMicroAdjMode"])
     canon_val = get_tag_value(metadata, ["MakerNotes:AFMicroAdjValue", "Canon:AFMicroAdjValue", "AFMicroAdjValue"])
+    canon_tele = get_tag_value(metadata, ["MakerNotes:AFMicroAdjTele", "Canon:AFMicroAdjTele", "AFMicroAdjTele"])
 
     generic_adj = get_tag_value(metadata, ["MakerNotes:AFMicroAdj", "XMP:AFFineTune", "Composite:AFFineTune"])
 
@@ -295,23 +313,25 @@ def extract_af_fine_tune(metadata: dict) -> str:
     if af_adj is not None or af_status is not None:
         status_str = str(af_status).strip() if af_status is not None else ""
         adj_str = fmt_signed(af_adj) if af_adj is not None else "0"
+        tele_part = f" / Tele: {fmt_signed(af_adj_tele)}" if af_adj_tele is not None and str(af_adj_tele).strip() != "" else ""
         if status_str.lower().startswith("off"):
             if adj_str != "0":
-                return f"Off (ค่าที่บันทึก: {adj_str})"
+                return f"Off (ค่าที่บันทึก: {adj_str}{tele_part})"
             return "Off (0)"
         elif status_str.lower().startswith("on"):
             idx_part = f" [Saved #{af_index}]" if af_index is not None and str(af_index).strip() not in ("", "0") else ""
-            return f"On ({adj_str}){idx_part}"
+            return f"On ({adj_str}{tele_part}){idx_part}"
         elif af_adj is not None:
-            return adj_str
+            return f"{adj_str}{tele_part}"
 
     if canon_val is not None or canon_mode is not None:
         mode_str = str(canon_mode).strip() if canon_mode is not None else ""
         val_str = fmt_signed(canon_val) if canon_val is not None else "0"
+        tele_part = f" / Tele: {fmt_signed(canon_tele)}" if canon_tele is not None and str(canon_tele).strip() != "" else ""
         if "disable" in mode_str.lower():
-            return f"Off ({val_str})" if val_str != "0" else "Off (0)"
+            return f"Off ({val_str}{tele_part})" if val_str != "0" else "Off (0)"
         elif canon_val is not None:
-            return f"{val_str} ({mode_str})" if mode_str else val_str
+            return f"{val_str}{tele_part} ({mode_str})" if mode_str else f"{val_str}{tele_part}"
 
     if generic_adj is not None:
         return fmt_signed(generic_adj)
@@ -319,110 +339,32 @@ def extract_af_fine_tune(metadata: dict) -> str:
     return "ไม่พบข้อมูลในไฟล์"
 
 
-def _fmt_signed_tune(val) -> str:
-    if val is None:
-        return "N/A"
-    s = str(val).strip()
-    if not s:
-        return "N/A"
-    try:
-        num = int(round(float(s)))
-        return f"+{num}" if num > 0 else str(num)
-    except Exception:
-        return s
-
-
 def extract_deep_makernotes(metadata: dict) -> dict:
-    """สกัดข้อมูล MakerNotes / Composite / EXIF เชิงลึกทั้งหมดจากไฟล์ RAW / JPEG"""
-    focus_mode = get_tag_value(metadata, ["MakerNotes:FocusMode", "Nikon:FocusMode", "Canon:FocusMode", "Sony:FocusMode", "FocusMode"])
-    af_area_mode = get_tag_value(metadata, ["MakerNotes:AFAreaMode", "Nikon:AFAreaMode", "Canon:AFAreaMode", "Sony:AFAreaMode", "AFAreaMode"])
-    focus_dist_raw = get_tag_value(metadata, ["MakerNotes:FocusDistance", "Nikon:FocusDistance", "Canon:FocusDistance", "Composite:FocusDistance", "XMP:ApproximateFocusDistance", "FocusDistance"])
+    """สกัดข้อมูล MakerNotes เชิงลึกจากไฟล์ RAW / JPEG พร้อมกรองข้อมูล Binary ขนาดใหญ่"""
+    focus_mode = get_tag_value(metadata, ["MakerNotes:FocusMode", "Nikon:FocusMode", "Canon:FocusMode", "FocusMode"])
+    af_area_mode = get_tag_value(metadata, ["MakerNotes:AFAreaMode", "Nikon:AFAreaMode", "Canon:AFAreaMode", "AFAreaMode"])
+    focus_dist_raw = get_tag_value(metadata, ["MakerNotes:FocusDistance", "Nikon:FocusDistance", "Composite:FocusDistance", "FocusDistance"])
     roll_raw = get_tag_value(metadata, ["MakerNotes:RollAngle", "Nikon:RollAngle", "RollAngle"])
     pitch_raw = get_tag_value(metadata, ["MakerNotes:PitchAngle", "Nikon:PitchAngle", "PitchAngle"])
-    white_balance = get_tag_value(metadata, ["EXIF:WhiteBalance", "MakerNotes:WhiteBalance", "Nikon:WhiteBalance", "WhiteBalance"])
+    white_balance = get_tag_value(metadata, ["EXIF:WhiteBalance", "MakerNotes:WhiteBalance", "WhiteBalance"])
     metering_mode = get_tag_value(metadata, ["EXIF:MeteringMode", "MeteringMode"])
     exp_comp = get_tag_value(metadata, ["EXIF:ExposureCompensation", "ExposureCompensation"])
-
-    # ค่าเจาะลึกสำหรับ AF Fine-Tune และการปรับตั้งกล้อง/เลนส์
-    af_tune_status = get_tag_value(metadata, ["MakerNotes:AFFineTune", "Nikon:AFFineTune", "MakerNotes:AFMicroAdjMode", "Canon:AFMicroAdjMode", "AFFineTune"])
-    af_tune_adj = get_tag_value(metadata, ["MakerNotes:AFFineTuneAdj", "Nikon:AFFineTuneAdj", "MakerNotes:AFTuneValue", "Nikon:AFTuneValue", "MakerNotes:AFMicroAdjValue", "Canon:AFMicroAdjValue"])
-    af_tune_tele = get_tag_value(metadata, ["MakerNotes:AFFineTuneAdjTele", "Nikon:AFFineTuneAdjTele", "MakerNotes:AFMicroAdjTele", "Canon:AFMicroAdjTele"])
-    af_tune_wide = get_tag_value(metadata, ["MakerNotes:AFFineTuneAdjWide", "Nikon:AFFineTuneAdjWide", "MakerNotes:AFMicroAdjWide", "Canon:AFMicroAdjWide"])
-    af_tune_index = get_tag_value(metadata, ["MakerNotes:AFFineTuneIndex", "Nikon:AFFineTuneIndex", "AFFineTuneIndex"])
-
-    af_points_used = get_tag_value(metadata, [
-        "MakerNotes:AFPointsUsed", "Nikon:AFPointsUsed",
-        "MakerNotes:AFPointsInFocus", "Nikon:AFPointsInFocus",
-        "MakerNotes:PrimaryAFPoint", "Nikon:PrimaryAFPoint",
-        "Canon:AFPointsInFocus", "AFPointsUsed"
-    ])
-    af_point_selected = get_tag_value(metadata, ["MakerNotes:AFPointSelected", "Nikon:AFPointSelected", "Canon:AFPointSelected", "AFPointSelected"])
-    focus_position = get_tag_value(metadata, ["MakerNotes:FocusPosition", "Nikon:FocusPosition", "Canon:FocusStepCount", "FocusPosition"])
-    focus_step_inf = get_tag_value(metadata, ["Canon:FocusStepInfinity", "MakerNotes:FocusStepInfinity"])
-    focus_step_near = get_tag_value(metadata, ["Canon:FocusStepNear", "MakerNotes:FocusStepNear"])
-
-    dof_val = get_tag_value(metadata, ["Composite:DOF", "DOF"])
-    hyperfocal_val = get_tag_value(metadata, ["Composite:HyperfocalDistance", "HyperfocalDistance"])
-    coc_val = get_tag_value(metadata, ["Composite:CircleOfConfusion", "CircleOfConfusion"])
-    fov_val = get_tag_value(metadata, ["Composite:FOV", "FOV"])
-    focal_35mm = get_tag_value(metadata, ["EXIF:FocalLengthIn35mmFormat", "Composite:FocalLength35efl", "FocalLengthIn35mmFormat"])
-
-    vr_status = get_tag_value(metadata, [
-        "MakerNotes:VibrationReduction", "Nikon:VibrationReduction",
-        "MakerNotes:VRMode", "Nikon:VRMode",
-        "MakerNotes:ImageStabilization", "Canon:ImageStabilization",
-        "Sony:ImageStabilization", "VibrationReduction"
-    ])
-    vr_mode = get_tag_value(metadata, ["MakerNotes:VRMode", "Nikon:VRMode", "Canon:ISMode", "VRMode"])
-
-    shutter_count = get_tag_value(metadata, [
-        "MakerNotes:ShutterCount", "Nikon:ShutterCount",
-        "MakerNotes:ImageCount", "Nikon:ImageCount",
-        "MakerNotes:ShutterCount2", "EXIF:ImageNumber", "ShutterCount"
-    ])
-    lens_serial = get_tag_value(metadata, ["EXIF:LensSerialNumber", "MakerNotes:LensSerialNumber", "Nikon:LensSerialNumber", "Canon:LensSerialNumber", "LensSerialNumber"])
-    camera_serial = get_tag_value(metadata, ["EXIF:SerialNumber", "MakerNotes:SerialNumber", "Nikon:SerialNumber", "Canon:SerialNumber", "MakerNotes:InternalSerialNumber", "SerialNumber"])
-    lens_spec = get_tag_value(metadata, ["Composite:LensSpec", "MakerNotes:LensSpec", "Nikon:LensSpec", "EXIF:LensInfo"])
-    lens_f_stops = get_tag_value(metadata, ["MakerNotes:LensFStops", "Nikon:LensFStops", "EffectiveMaxAperture"])
-    picture_control = get_tag_value(metadata, ["MakerNotes:PictureControlName", "Nikon:PictureControlName", "Canon:PictureStyle", "PictureControlName"])
-    active_d_lighting = get_tag_value(metadata, ["MakerNotes:ActiveD-Lighting", "Nikon:ActiveD-Lighting", "Canon:AutoLightingOptimizer"])
-    high_iso_nr = get_tag_value(metadata, ["MakerNotes:HighISONoiseReduction", "Nikon:HighISONoiseReduction", "Canon:HighISONoiseReduction"])
-    vignette_control = get_tag_value(metadata, ["MakerNotes:VignetteControl", "Nikon:VignetteControl", "Canon:PeripheralIlluminationCorr"])
-    firmware_ver = get_tag_value(metadata, ["EXIF:Software", "MakerNotes:FirmwareVersion", "Canon:FirmwareVersion"])
 
     focus_dist_val = parse_float(focus_dist_raw)
     roll_val = parse_float(roll_raw)
     pitch_val = parse_float(pitch_raw)
 
-    # รวบรวม Tag ทั้งหมดจาก ExifTool แยกกลุ่มและทำดัชนีสำหรับการค้นหาเชิงลึก
-    af_keywords = (
-        "af", "focus", "tune", "micro", "lens", "dof", "hyperfocal",
-        "vr", "vibration", "stabiliz", "shutter", "aperture", "focal",
-        "serial", "roll", "pitch", "pupil", "distance"
-    )
-    all_tags_list = []
-    for full_key, raw_val in metadata.items():
-        if full_key.startswith("SourceFile") or full_key.startswith("System:"):
+    # รวบรวม Tag ทั้งหมดที่อ่านได้ (ข้าม Binary Blob ขนาดใหญ่เพื่อรักษาขนาด JSON)
+    all_tags = {}
+    for k, v in metadata.items():
+        if k.startswith("SourceFile") or k.startswith("System:"):
             continue
-        if ":" in full_key:
-            group_name, tag_name = full_key.split(":", 1)
-        else:
-            group_name, tag_name = "General", full_key
-
-        val_str = str(raw_val).strip()
-        # ย่อเฉพาะก้อน Binary/Base64 ที่ยาวผิดปกติเพื่อไม่ให้ JSON บวมจน RAM เต็ม
-        if len(val_str) > 350 and ("Binary data" in val_str or re.match(r'^[A-Za-z0-9+/=\s]+$', val_str)):
-            val_str = val_str[:120] + f"... [ย่อข้อมูลไบนารี {len(val_str)} ตัวอักษร]"
-
-        lower_combo = f"{group_name} {tag_name}".lower()
-        is_af_related = any(kw in lower_combo for kw in af_keywords)
-
-        all_tags_list.append({
-            "group": group_name,
-            "tag": tag_name,
-            "value": val_str,
-            "is_af_related": is_af_related,
-        })
+        if v is None:
+            continue
+        s_val = str(v).strip()
+        if not s_val or s_val.startswith("(Binary data") or len(s_val) > 300:
+            continue
+        all_tags[k] = s_val
 
     return {
         "focus_mode": str(focus_mode).strip() if focus_mode is not None else "N/A",
@@ -434,53 +376,43 @@ def extract_deep_makernotes(metadata: dict) -> dict:
         "white_balance": str(white_balance).strip() if white_balance is not None else "N/A",
         "metering_mode": str(metering_mode).strip() if metering_mode is not None else "N/A",
         "exposure_comp": str(exp_comp).strip() if exp_comp is not None else "0",
-        # พารามิเตอร์เจาะลึกสำหรับ AF Fine-Tune และการจูนกล้อง/เลนส์
-        "af_tune_status": str(af_tune_status).strip() if af_tune_status is not None else "N/A",
-        "af_tune_adj": _fmt_signed_tune(af_tune_adj),
-        "af_tune_tele": _fmt_signed_tune(af_tune_tele),
-        "af_tune_wide": _fmt_signed_tune(af_tune_wide),
-        "af_tune_index": str(af_tune_index).strip() if af_tune_index is not None else "N/A",
-        "af_points_used": str(af_points_used).strip() if af_points_used is not None else "N/A",
-        "af_point_selected": str(af_point_selected).strip() if af_point_selected is not None else "N/A",
-        "focus_position": str(focus_position).strip() if focus_position is not None else "N/A",
-        "focus_step_range": f"Inf:{focus_step_inf} / Near:{focus_step_near}" if (focus_step_inf is not None or focus_step_near is not None) else "N/A",
-        "dof": str(dof_val).strip() if dof_val is not None else "N/A",
-        "hyperfocal_distance": str(hyperfocal_val).strip() if hyperfocal_val is not None else "N/A",
-        "circle_of_confusion": str(coc_val).strip() if coc_val is not None else "N/A",
-        "fov": str(fov_val).strip() if fov_val is not None else "N/A",
-        "focal_length_35mm": str(focal_35mm).strip() if focal_35mm is not None else "N/A",
-        "vr_status": str(vr_status).strip() if vr_status is not None else "N/A",
-        "vr_mode": str(vr_mode).strip() if vr_mode is not None else "N/A",
-        "shutter_count": str(shutter_count).strip() if shutter_count is not None else "N/A",
-        "lens_serial": str(lens_serial).strip() if lens_serial is not None else "N/A",
-        "camera_serial": str(camera_serial).strip() if camera_serial is not None else "N/A",
-        "lens_spec": str(lens_spec).strip() if lens_spec is not None else "N/A",
-        "lens_f_stops": str(lens_f_stops).strip() if lens_f_stops is not None else "N/A",
-        "picture_control": str(picture_control).strip() if picture_control is not None else "N/A",
-        "active_d_lighting": str(active_d_lighting).strip() if active_d_lighting is not None else "N/A",
-        "high_iso_nr": str(high_iso_nr).strip() if high_iso_nr is not None else "N/A",
-        "vignette_control": str(vignette_control).strip() if vignette_control is not None else "N/A",
-        "firmware_ver": str(firmware_ver).strip() if firmware_ver is not None else "N/A",
-        "total_tags_count": len(all_tags_list),
-        "all_tags": all_tags_list,
+        "all_tags": all_tags,
     }
 
 
-def load_image_robust(file_path: str) -> np.ndarray:
+def _cap_source_image_ram(img: np.ndarray) -> Tuple[np.ndarray, int, int]:
+    """เก็บค่าความละเอียดต้นฉบับจริง แล้วลดขนาดบัฟเฟอร์ภาพใน RAM ลงไม่เกิน MAX_SOURCE_DIM"""
+    true_h, true_w = img.shape[:2]
+    max_side = max(true_h, true_w)
+    if max_side > MAX_SOURCE_DIM:
+        s = MAX_SOURCE_DIM / float(max_side)
+        resized = cv2.resize(img, (int(true_w * s), int(true_h * s)), interpolation=cv2.INTER_AREA)
+        del img
+        gc.collect()
+        return resized, true_w, true_h
+    return img, true_w, true_h
+
+
+def load_image_robust(file_path: str) -> Tuple[np.ndarray, int, int]:
+    """อ่านไฟล์ภาพปกติและไฟล์ RAW พร้อมควบคุมขนาดบัฟเฟอร์ใน RAM ไม่ให้เกินขีดจำกัด"""
     img = cv2.imread(file_path)
     if img is not None:
-        return img
+        return _cap_source_image_ram(img)
+
     try:
         for tag in ["-JpgFromRaw", "-PreviewImage", "-ThumbnailImage"]:
             cmd = ["exiftool", "-b", tag, file_path]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             if res.returncode == 0 and len(res.stdout) > 2000:
                 nparr = np.frombuffer(res.stdout, np.uint8)
                 decoded = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                del nparr, res
+                gc.collect()
                 if decoded is not None:
-                    return decoded
+                    return _cap_source_image_ram(decoded)
     except Exception as e:
         logger.error(f"RAW Preview Extraction Failed: {e}")
+
     raise ValueError("ไม่สามารถเปิดอ่านไฟล์ภาพได้")
 
 
@@ -498,10 +430,10 @@ def parse_camera_af_point(metadata: dict, img_w: int, img_h: int) -> Tuple[str, 
     ])
     af_text = str(raw_af).strip() if raw_af is not None else "Center"
 
-    af_img_w = parse_float(get_tag_value(metadata, ["MakerNotes:AFImageWidth", "Nikon:AFImageWidth", "AFImageWidth"]))
-    af_img_h = parse_float(get_tag_value(metadata, ["MakerNotes:AFImageHeight", "Nikon:AFImageHeight", "AFImageHeight"]))
-    af_area_x = parse_float(get_tag_value(metadata, ["MakerNotes:AFAreaXPosition", "Nikon:AFAreaXPosition", "AFAreaXPosition"]))
-    af_area_y = parse_float(get_tag_value(metadata, ["MakerNotes:AFAreaYPosition", "Nikon:AFAreaYPosition", "AFAreaYPosition"]))
+    af_img_w = parse_float(get_tag_value(metadata, ["MakerNotes:AFImageWidth", "AFImageWidth"]))
+    af_img_h = parse_float(get_tag_value(metadata, ["MakerNotes:AFImageHeight", "AFImageHeight"]))
+    af_area_x = parse_float(get_tag_value(metadata, ["MakerNotes:AFAreaXPosition", "AFAreaXPosition"]))
+    af_area_y = parse_float(get_tag_value(metadata, ["MakerNotes:AFAreaYPosition", "AFAreaYPosition"]))
 
     if af_img_w and af_img_h and af_area_x is not None and af_area_y is not None:
         if af_img_w > 0 and af_img_h > 0:
@@ -594,14 +526,14 @@ def extract_highres_crop_b64(
     center_x_work: int,
     center_y_work: int,
     scale: float,
-    max_crop_px: int = 860,
-    jpeg_quality: int = 96,
+    max_crop_px: int = 640,
+    jpeg_quality: int = 88,
 ) -> str:
-    """ตัดภาพรายละเอียด 100% จากภาพต้นฉบับความละเอียดสูง โดยคงความคมชัดสูงสุด"""
+    """ตัดภาพรายละเอียด 100% จากภาพต้นฉบับความละเอียดสูง โดยควบคุมขนาดหน่วยความจำ"""
     orig_h, orig_w = orig_img.shape[:2]
     orig_cx = int(center_x_work / scale)
     orig_cy = int(center_y_work / scale)
-    orig_half = max(240, min(orig_w, orig_h) // 6)
+    orig_half = max(200, min(orig_w, orig_h) // 6)
 
     x1 = max(0, orig_cx - orig_half)
     x2 = min(orig_w, orig_cx + orig_half)
@@ -618,19 +550,9 @@ def extract_highres_crop_b64(
         crop = cv2.resize(crop, (int(cw * c_scale), int(ch * c_scale)), interpolation=cv2.INTER_AREA)
 
     _, buf = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
-    return f"data:image/jpeg;base64,{base64.b64encode(buf).decode('utf-8')}"
-
-
-def create_overview_thumbnail_b64(work_img: np.ndarray, max_dim: int = 520, jpeg_quality: int = 88) -> str:
-    """สร้างภาพขนาดย่อสำหรับดูภาพรวมในตาราง MakerNotes (โหลดเร็วและคมชัด)"""
-    h, w = work_img.shape[:2]
-    if max(h, w) > max_dim:
-        t_scale = max_dim / float(max(h, w))
-        thumb = cv2.resize(work_img, (int(w * t_scale), int(h * t_scale)), interpolation=cv2.INTER_AREA)
-    else:
-        thumb = work_img
-    _, buf = cv2.imencode(".jpg", thumb, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
-    return f"data:image/jpeg;base64,{base64.b64encode(buf).decode('utf-8')}"
+    b64_str = base64.b64encode(buf).decode("utf-8")
+    del buf
+    return f"data:image/jpeg;base64,{b64_str}"
 
 
 def compute_texture_and_histogram(
@@ -675,7 +597,7 @@ def compute_texture_and_histogram(
     highlight_clipping_pct = round(float((np.sum(gray_img >= 250) / total_pixels) * 100.0), 2)
     shadow_crushing_pct = round(float((np.sum(gray_img <= 5) / total_pixels) * 100.0), 2)
 
-    # 5. RGB Histogram (64 bins normalized % สำหรับแสดงกราฟสวยงามและน้ำหนักเบา)
+    # 5. RGB Histogram (64 bins normalized %)
     bins = 64
     hist_r = cv2.calcHist([roi_bgr], [2], None, [bins], [0, 256]).flatten()
     hist_g = cv2.calcHist([roi_bgr], [1], None, [bins], [0, 256]).flatten()
@@ -688,7 +610,7 @@ def compute_texture_and_histogram(
         "b": [round(float(v / roi_px * 100.0), 2) for v in hist_b],
     }
 
-    # 6. ภาพตัวอย่าง ROI และ Canny Edge Map ความละเอียดสูง (560x560px จากภาพต้นฉบับ)
+    # 6. ภาพตัวอย่าง ROI และ Canny Edge Map (480x480px เพื่อประหยัด RAM และ Payload)
     orig_h, orig_w = orig_img.shape[:2]
     ox1 = max(0, int(x1 / scale))
     ox2 = min(orig_w, int(x2 / scale))
@@ -696,17 +618,17 @@ def compute_texture_and_histogram(
     oy2 = min(orig_h, int(y2 / scale))
     orig_roi = orig_img[oy1:oy2, ox1:ox2] if (ox2 > ox1 and oy2 > oy1) else roi_bgr
 
-    interp_roi = cv2.INTER_AREA if orig_roi.shape[0] >= 560 else cv2.INTER_LANCZOS4
-    roi_disp = cv2.resize(orig_roi, (560, 560), interpolation=interp_roi) if orig_roi.shape[0] > 0 else roi_bgr
-    canny_disp = cv2.resize(canny, (560, 560), interpolation=cv2.INTER_NEAREST) if canny.shape[0] > 0 else canny
+    interp_roi = cv2.INTER_AREA if orig_roi.shape[0] >= 480 else cv2.INTER_LANCZOS4
+    roi_disp = cv2.resize(orig_roi, (480, 480), interpolation=interp_roi) if orig_roi.shape[0] > 0 else roi_bgr
+    canny_disp = cv2.resize(canny, (480, 480), interpolation=cv2.INTER_NEAREST) if canny.shape[0] > 0 else canny
 
-    _, roi_buf = cv2.imencode(".jpg", roi_disp, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    _, roi_buf = cv2.imencode(".jpg", roi_disp, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     _, canny_buf = cv2.imencode(".png", canny_disp)
 
     af_roi_b64 = f"data:image/jpeg;base64,{base64.b64encode(roi_buf).decode('utf-8')}"
     canny_b64 = f"data:image/png;base64,{base64.b64encode(canny_buf).decode('utf-8')}"
 
-    del gx, gy, canny, roi_disp, canny_disp
+    del gx, gy, canny, roi_disp, canny_disp, roi_buf, canny_buf
     return {
         "edge_density_pct": edge_density_pct,
         "mean_gradient": mean_gradient,
@@ -847,12 +769,11 @@ def evaluate_photo_quality(
 
 def read_exiftool_metadata(file_path: str) -> dict:
     try:
-        # ใช้ -G1 -a -u เพื่อสกัดข้อมูล MakerNotes / Composite / Unknown Tags เชิงลึกให้ได้มากที่สุด
         cmd = ["exiftool", "-j", "-G1", "-a", "-u", "-charset", "utf8", file_path]
         res = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -942,49 +863,21 @@ def extract_exif_data(file_path: str) -> dict:
                 "white_balance": "N/A",
                 "metering_mode": "N/A",
                 "exposure_comp": "0",
-                "af_tune_status": "N/A",
-                "af_tune_adj": "N/A",
-                "af_tune_tele": "N/A",
-                "af_tune_wide": "N/A",
-                "af_tune_index": "N/A",
-                "af_points_used": "N/A",
-                "af_point_selected": "N/A",
-                "focus_position": "N/A",
-                "focus_step_range": "N/A",
-                "dof": "N/A",
-                "hyperfocal_distance": "N/A",
-                "circle_of_confusion": "N/A",
-                "fov": "N/A",
-                "focal_length_35mm": "N/A",
-                "vr_status": "N/A",
-                "vr_mode": "N/A",
-                "shutter_count": "N/A",
-                "lens_serial": "N/A",
-                "camera_serial": "N/A",
-                "lens_spec": "N/A",
-                "lens_f_stops": "N/A",
-                "picture_control": "N/A",
-                "active_d_lighting": "N/A",
-                "high_iso_nr": "N/A",
-                "vignette_control": "N/A",
-                "firmware_ver": "N/A",
-                "total_tags_count": 0,
-                "all_tags": [],
+                "all_tags": {},
             },
         }
 
 
 def process_image_and_sharpness(file_path: str, exif_info: dict):
-    """วิเคราะห์ความคมชัดเชิงแสงทั้งภาพ เปรียบเทียบจุดโฟกัส วิเคราะห์ Edge/Histogram และสร้างภาพตัวอย่างความละเอียดสูง"""
+    """วิเคราะห์ความคมชัดเชิงแสงทั้งภาพ เปรียบเทียบจุดโฟกัส วิเคราะห์ Edge/Histogram และคืน RAM ทีละขั้น"""
     metadata = exif_info["metadata"]
     iso_val = exif_info["iso"]
-    orig_img = load_image_robust(file_path)
+    orig_img, true_orig_w, true_orig_h = load_image_robust(file_path)
     orig_h, orig_w = orig_img.shape[:2]
 
-    # เพิ่มความละเอียดภาพทำงานเป็น 2048px เพื่อให้ภาพตัวอย่างชัดเจนขึ้นมาก
-    max_dim = 2048
-    if max(orig_h, orig_w) > max_dim:
-        scale = max_dim / float(max(orig_h, orig_w))
+    # ลดขนาดภาพทำงานเป็น MAX_WORK_DIM (1500px) เพื่อประหยัด RAM บน Render
+    if max(orig_h, orig_w) > MAX_WORK_DIM:
+        scale = MAX_WORK_DIM / float(max(orig_h, orig_w))
         work_img = cv2.resize(orig_img, (int(orig_w * scale), int(orig_h * scale)), interpolation=cv2.INTER_AREA)
     else:
         scale = 1.0
@@ -996,7 +889,7 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
 
     # 1. อ่านพิกัดจุดโฟกัสจากกล้อง (Camera AF Point)
     af_point_text, af_cx, af_cy = parse_camera_af_point(metadata, w, h)
-    half_box = max(36, min(w, h) // 10)
+    half_box = max(32, min(w, h) // 10)
 
     try:
         iso_num = float(parse_float(iso_val) or 100.0)
@@ -1052,6 +945,9 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
 
     peak_sharpness = round(peak_raw / noise_penalty, 2)
 
+    # ลบ denoised_gray ทันทีหลังคำนวณความคมชัดเสร็จ
+    del denoised_gray
+
     # 4. คำนวณระยะห่างและเปรียบเทียบระหว่างจุดโฟกัสกล้องกับจุดที่คมชัดที่สุด
     diag = math.hypot(w, h)
     dx = peak_cx - af_cx
@@ -1094,10 +990,11 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
             f"| แนะนำตรวจสอบ Front/Back Focus หรือปรับชดเชย AF Fine-tune"
         )
 
-    # 5. วิเคราะห์ Edge Density, Contrast และ RGB Histogram ความละเอียดสูง (สำหรับเมนูที่ 2, 3, 4)
+    # 5. วิเคราะห์ Edge Density, Contrast และ RGB Histogram
     texture_metrics = compute_texture_and_histogram(orig_img, work_img, gray, af_cx, af_cy, half_box, scale)
+    del gray
 
-    # 6. คำนวณคะแนนคุณภาพรวม (Composite Quality Score) และคัดกรองข้อบกพร่อง (สำหรับเมนูที่ 2)
+    # 6. คำนวณคะแนนคุณภาพรวม (Composite Quality Score)
     quality_eval = evaluate_photo_quality(
         af_sharpness=af_sharpness,
         peak_sharpness=peak_sharpness,
@@ -1113,19 +1010,21 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
         roll_angle=exif_info["deep_notes"].get("roll_angle"),
     )
 
-    # 7. สร้างภาพครอปความละเอียดสูง 100% ทั้งจุดที่ชัดที่สุด (Peak) และจุดโฟกัสกล้อง (AF Point)
-    sharpest_crop_b64 = extract_highres_crop_b64(orig_img, peak_cx, peak_cy, scale, max_crop_px=860, jpeg_quality=96)
-    af_crop_b64 = extract_highres_crop_b64(orig_img, af_cx, af_cy, scale, max_crop_px=860, jpeg_quality=96)
+    # 7. สร้างภาพครอปความละเอียดสูง (640px Quality 88 เพื่อประหยัด RAM และ Payload)
+    sharpest_crop_b64 = extract_highres_crop_b64(orig_img, peak_cx, peak_cy, scale, max_crop_px=640, jpeg_quality=88)
+    af_crop_b64 = extract_highres_crop_b64(orig_img, af_cx, af_cy, scale, max_crop_px=640, jpeg_quality=88)
 
-    # 8. สร้างภาพขนาดย่อสำหรับแสดงภาพรวมในเมนู MakerNotes (Overview Thumbnail)
-    overview_thumb_b64 = create_overview_thumbnail_b64(work_img, max_dim=520, jpeg_quality=88)
+    # คืน RAM ของภาพต้นฉบับทันทีหลังตัดครอปเสร็จ ก่อนเข้ารหัสภาพเต็มเฟรม
+    del orig_img
+    gc.collect()
 
-    # 9. สร้างภาพเต็มเฟรมแบบสะอาด (Clean High-Res Preview) สำหรับเครื่องมือเลือกครอปส่วนภาพเองในตาราง
-    _, clean_buf = cv2.imencode(".jpg", work_img, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
+    # 8. สร้างภาพเต็มเฟรมแบบสะอาด (Clean Preview) สำหรับเครื่องมือครอปในหน้าเว็บ
+    _, clean_buf = cv2.imencode(".jpg", work_img, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
     clean_preview_b64 = f"data:image/jpeg;base64,{base64.b64encode(clean_buf).decode('utf-8')}"
+    del clean_buf
 
-    # 10. วาดกรอบเปรียบเทียบลงบนภาพเต็ม (พิกัดจุดโฟกัสกล้อง vs พิกัดจุดที่คมชัดที่สุด)
-    annotated_img = work_img.copy()
+    # 9. วาดกรอบเปรียบเทียบลงบนภาพเต็ม (พิกัดจุดโฟกัสกล้อง vs พิกัดจุดที่คมชัดที่สุด)
+    annotated_img = work_img
     thickness = max(2, int(min(w, h) / 400))
 
     af_color = (255, 120, 0)
@@ -1137,7 +1036,7 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
         (af_cx, af_cy),
         af_color,
         markerType=cv2.MARKER_CROSS,
-        markerSize=28,
+        markerSize=26,
         thickness=thickness + 1,
     )
 
@@ -1153,15 +1052,13 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
         (peak_cx, peak_cy),
         peak_color,
         markerType=cv2.MARKER_STAR,
-        markerSize=30,
+        markerSize=28,
         thickness=thickness + 1,
     )
 
-    _, buffer = cv2.imencode(".jpg", annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    _, buffer = cv2.imencode(".jpg", annotated_img, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
     annotated_b64 = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
-
-    # คืนค่า RAM ทันทีหลังประมวลผลภาพเสร็จ (รองรับ Render 512MB RAM)
-    del orig_img, work_img, gray, denoised_gray, annotated_img
+    del buffer, annotated_img
     gc.collect()
 
     return {
@@ -1180,12 +1077,11 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
         "advice": advice,
         "annotated_image": annotated_b64,
         "clean_preview_image": clean_preview_b64,
-        "overview_thumbnail": overview_thumb_b64,
         "sharpest_crop_image": sharpest_crop_b64,
         "af_crop_image": af_crop_b64,
         "af_point": af_point_text,
         # ฟิลด์ต่อยอดสำหรับ Menu 2, 3, 4
-        "resolution": f"{orig_w} x {orig_h}",
+        "resolution": f"{true_orig_w} x {true_orig_h}",
         "texture": texture_metrics,
         "quality_eval": quality_eval,
     }
@@ -1195,18 +1091,20 @@ def process_image_and_sharpness(file_path: str, exif_info: dict):
 async def read_index():
     if os.path.exists("index.html"):
         return FileResponse("index.html")
-    return HTMLResponse("<h1>Pro Lens & Camera Optical Sharpness API v2.2 Running</h1>")
+    return HTMLResponse("<h1>Pro Lens & Camera Optical Sharpness API v2.1 Running</h1>")
 
 
 @app.get("/api/v1/health")
 async def health_check():
     return {
         "status": "ok",
-        "version": "2.2.0",
+        "version": "2.1.1",
         "limits": {
             "max_file_size_mb": MAX_FILE_SIZE_MB,
             "recommended_batch_files": MAX_RECOMMENDED_BATCH,
             "max_session_items": MAX_SESSION_ITEMS,
+            "max_source_dim": MAX_SOURCE_DIM,
+            "max_work_dim": MAX_WORK_DIM,
         },
         "modules": ["AF_Calibration", "Quality_Scoring", "Edge_Histogram", "Statistical_Insights"],
     }
@@ -1272,7 +1170,6 @@ async def _handle_image_analysis(file: UploadFile) -> dict:
                 "advice": analysis["advice"],
                 "annotated_image": analysis["annotated_image"],
                 "clean_preview_image": analysis["clean_preview_image"],
-                "overview_thumbnail": analysis["overview_thumbnail"],
                 "sharpest_crop_image": analysis["sharpest_crop_image"],
                 "af_crop_image": analysis["af_crop_image"],
                 "deep_notes": exif_info["deep_notes"],
