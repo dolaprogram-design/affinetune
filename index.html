@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.1</title>
+  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.2</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
 /* Precompiled Tailwind Utility Styles (Production-Ready, Zero Console Warning) */
@@ -39,6 +39,24 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
   border-radius: 4px;
   white-space: nowrap;
 }
+/* Styles สำหรับแผงแสดงภาพขนาดย่อ & เจาะลึก MakerNotes ในเมนูที่ 4 */
+.mn-row-selected { background-color: #eef2ff !important; }
+.mn-row-selected td:first-child { box-shadow: inset 4px 0 0 #4f46e5; }
+.mn-inspector-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
+@media (min-width: 1024px) {
+  .mn-inspector-grid { grid-template-columns: 380px 1fr; }
+}
+.mn-kv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+@media (min-width: 640px) {
+  .mn-kv-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.mn-filter-pill.active { background-color: #4f46e5; color: #ffffff; border-color: #4f46e5; }
+.underline { text-decoration: underline; }
+.break-all { word-break: break-all; }
+.whitespace-nowrap { white-space: nowrap; }
+.w-10 { width: 2.5rem; }
+.h-8 { height: 2rem; }
+.max-h-96 { max-height: 24rem; }
 .absolute { position: absolute; }
 .align-top { vertical-align: top; }
 .antialiased { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -333,7 +351,7 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
             <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
               <span>🔬</span> ระบบวิเคราะห์ความคมชัดเชิงแสง &amp; ประเมินคุณภาพภาพถ่าย (Optical AF &amp; Quality Analytics)
             </h1>
-            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">v2.1 High-Res &amp; Safe-RAM</span>
+            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">v2.2 High-Res &amp; Deep MakerNotes</span>
           </div>
           <p class="text-sm text-slate-500 mt-1">
             สกัดข้อมูล EXIF / AF Fine-tune จริงจากไฟล์ RAW (.NEF, .CR2, .CR3, .ARW, .DNG) และ JPG พร้อมระบบเลือกครอปภาพตัวอย่างความละเอียดสูงและจัดเกรดอัตโนมัติ
@@ -591,28 +609,115 @@ table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
           </div>
         </div>
 
-        <!-- Row 3: Deep MakerNotes Table -->
+        <!-- Row 3: Deep MakerNotes Table & Interactive Thumbnail + Full Tag Inspector -->
         <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
-            <h3 class="text-base font-bold text-slate-800">🗂️ ตารางอภิข้อมูลเชิงลึกจาก MakerNotes (Deep RAW/EXIF Metadata)</h3>
-            <p class="text-xs text-slate-500 mt-0.5">สกัดค่าพารามิเตอร์ระบบโฟกัส ระยะโฟกัส และความเอียงระนาบกล้องที่ซ่อนอยู่ในไฟล์ภาพ</p>
+          <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-base font-bold text-slate-800">🗂️ ตารางอภิข้อมูลเชิงลึกจาก MakerNotes (Deep RAW/EXIF Metadata)</h3>
+              <p class="text-xs text-slate-500 mt-0.5">
+                คลิกที่ <strong>ชื่อไฟล์</strong> หรือ <strong>รายการแต่ละแถว</strong> เพื่อแสดงภาพขนาดย่อ ค่าปรับตั้ง AF Fine-tune และค้นหาอภิข้อมูลทุก Tag ที่สกัดได้จากไฟล์
+              </p>
+            </div>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
+              👆 คลิกชื่อไฟล์ในตารางเพื่อดูภาพขนาดย่อ &amp; เจาะลึก Tag ทั้งหมด
+            </span>
           </div>
+
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse text-xs">
               <thead>
                 <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase">
-                  <th class="py-3 px-4">ชื่อไฟล์</th>
-                  <th class="py-3 px-4">ความละเอียด</th>
-                  <th class="py-3 px-4">Focus Mode</th>
-                  <th class="py-3 px-4">AF Area Mode</th>
-                  <th class="py-3 px-4">ระยะโฟกัส (Focus Dist.)</th>
-                  <th class="py-3 px-4">มุมเอียง Roll / Pitch</th>
-                  <th class="py-3 px-4">White Balance</th>
-                  <th class="py-3 px-4">ระบบวัดแสง (Metering)</th>
+                  <th class="py-3 px-4">ชื่อไฟล์ (คลิกเพื่อดูภาพขนาดย่อ)</th>
+                  <th class="py-3 px-4">AF Fine-Tune (สถานะ / ค่าจูน)</th>
+                  <th class="py-3 px-4">Focus Mode / AF Area</th>
+                  <th class="py-3 px-4">จุดโฟกัส / Focus Pos.</th>
+                  <th class="py-3 px-4">ระยะโฟกัส / ระยะชัดลึก (DOF)</th>
+                  <th class="py-3 px-4">กันสั่น (VR) / Roll-Pitch</th>
+                  <th class="py-3 px-4">ชัตเตอร์ / ซีเรียลเลนส์</th>
+                  <th class="py-3 px-4 text-right">Tags ทั้งหมด</th>
                 </tr>
               </thead>
               <tbody id="deepMetadataBody" class="divide-y divide-slate-200"></tbody>
             </table>
+          </div>
+
+          <!-- แผงแสดงภาพขนาดย่อ + ค่าปรับจูน AF Fine-Tune + ตารางเจาะลึกทุก Tag ของไฟล์ที่คลิก -->
+          <div id="makerNotesInspectorPanel" class="border-t border-slate-200 bg-slate-50/70 p-5">
+            <div class="mn-inspector-grid">
+              <!-- คอลัมน์ซ้าย: ภาพขนาดย่อ (Overview Thumbnail) & คำแนะนำจูน AF Fine-Tune -->
+              <div class="bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between space-y-3 shadow-xs">
+                <div>
+                  <div class="flex items-center justify-between gap-2 mb-2">
+                    <div class="text-xs font-bold text-slate-800" id="mnPreviewFilename">🖼️ เลือกไฟล์จากตารางด้านบน</div>
+                    <div class="flex items-center gap-1 text-[11px]">
+                      <button id="mnThumbModeCleanBtn" onclick="setMnThumbnailMode('clean')" class="px-2 py-0.5 rounded bg-indigo-600 text-white font-semibold cursor-pointer">ภาพรวม</button>
+                      <button id="mnThumbModeAfBtn" onclick="setMnThumbnailMode('annotated')" class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold cursor-pointer">กรอบจุด AF</button>
+                    </div>
+                  </div>
+
+                  <div class="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center min-h-[240px]">
+                    <img id="mnPreviewImg" src="" alt="Overview Thumbnail" class="max-h-64 w-auto object-contain cursor-pointer" onclick="openSelectedMnFileModal()" title="คลิกเพื่อเปิดขยาย 100%-200% และครอปตรวจสอบ" />
+                    <button onclick="openSelectedMnFileModal()" class="absolute bottom-1.5 right-1.5 bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg cursor-pointer">
+                      🔍 ขยาย 100%–200%
+                    </button>
+                  </div>
+
+                  <div id="mnCameraLensCaption" class="text-[11px] text-slate-500 mt-2 leading-relaxed"></div>
+                </div>
+
+                <!-- กล่องสรุปค่าจูน AF Fine-Tune สำหรับปรับตั้งในกล้อง -->
+                <div id="mnAfTuneAdviceBox" class="rounded-xl bg-indigo-50/70 border border-indigo-200 p-3 text-xs text-slate-700 space-y-1.5"></div>
+              </div>
+
+              <!-- คอลัมน์ขวา: พารามิเตอร์เชิงลึกสำหรับปรับตั้งกล้อง/เลนส์ + ค้นหาทุก Tag ในไฟล์ -->
+              <div class="bg-white rounded-xl border border-slate-200 p-4 flex flex-col space-y-3 shadow-xs">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="text-xs font-bold text-slate-800">
+                    🎯 พารามิเตอร์ระบบโฟกัส เลนส์ และสภาพการถ่ายภาพ (สำหรับปรับค่ากล้อง/เลนส์)
+                  </div>
+                  <span id="mnTotalTagsBadge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    0 Tags
+                  </span>
+                </div>
+
+                <!-- การ์ดสรุปค่า MakerNotes สำคัญ 12 รายการ -->
+                <div id="mnKeyParamsGrid" class="mn-kv-grid text-xs"></div>
+
+                <!-- แถบค้นหาและตัวกรองหมวดหมู่ Tag ทั้งหมดในไฟล์ -->
+                <div class="pt-2 border-t border-slate-200 space-y-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="text-xs font-bold text-slate-700">📑 อภิข้อมูลทั้งหมดที่สกัดได้จากไฟล์ (Full Raw / MakerNotes / EXIF Tags)</div>
+                    <div class="flex flex-wrap items-center gap-1 text-[11px]" id="mnTagCategoryFilters">
+                      <button onclick="setMnTagFilter('ALL')" data-cat="ALL" class="mn-filter-pill active px-2 py-0.5 rounded border border-slate-300 font-semibold cursor-pointer">ทั้งหมด</button>
+                      <button onclick="setMnTagFilter('AF')" data-cat="AF" class="mn-filter-pill px-2 py-0.5 rounded border border-slate-300 text-slate-600 font-semibold cursor-pointer">🎯 เฉพาะ AF / เลนส์</button>
+                      <button onclick="setMnTagFilter('MAKER')" data-cat="MAKER" class="mn-filter-pill px-2 py-0.5 rounded border border-slate-300 text-slate-600 font-semibold cursor-pointer">📷 MakerNotes</button>
+                      <button onclick="setMnTagFilter('COMP')" data-cat="COMP" class="mn-filter-pill px-2 py-0.5 rounded border border-slate-300 text-slate-600 font-semibold cursor-pointer">📐 Composite / DOF</button>
+                    </div>
+                  </div>
+
+                  <input
+                    type="text"
+                    id="mnTagSearchInput"
+                    oninput="renderMnAllTagsTable()"
+                    placeholder="🔍 ค้นหาชื่อ Tag หรือค่าข้อมูล (เช่น AFFineTune, Focus, Distance, VR, Shutter, Serial, Lens, Focal)..."
+                    class="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+
+                  <div class="overflow-y-auto max-h-96 border border-slate-200 rounded-lg">
+                    <table class="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr class="bg-slate-100 border-b border-slate-200 text-slate-600">
+                          <th class="py-2 px-3 w-32">กลุ่มข้อมูล</th>
+                          <th class="py-2 px-3 w-60">ชื่อ Tag (MakerNotes / EXIF)</th>
+                          <th class="py-2 px-3">ค่าที่บันทึกในไฟล์</th>
+                        </tr>
+                      </thead>
+                      <tbody id="mnAllTagsBody" class="divide-y divide-slate-200"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -795,6 +900,11 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
     let chartScatter = null;
     let activeMenu = 'menu1';
 
+    // State สำหรับ Interactive MakerNotes Inspector ในเมนูที่ 4
+    let selectedMnRowId = null;
+    let mnThumbMode = 'clean'; // 'clean' | 'annotated'
+    let mnTagCategory = 'ALL'; // 'ALL' | 'AF' | 'MAKER' | 'COMP'
+
     // State สำหรับ Interactive Cropper ใน Modal
     let currentModalRowId = null;
     let currentCropPreset = 'peak'; // 'peak' | 'af' | 'custom'
@@ -837,6 +947,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
             delete histCharts[oldestId];
           }
           delete analyzedStore[oldestId];
+          if (selectedMnRowId === oldestId) selectedMnRowId = null;
           const oldRow = document.getElementById(oldestId);
           if (oldRow) oldRow.remove();
           evictedCount++;
@@ -891,6 +1002,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
       Object.keys(histCharts).forEach(k => delete histCharts[k]);
       Object.keys(analyzedStore).forEach(k => delete analyzedStore[k]);
       analyzedOrder.length = 0;
+      selectedMnRowId = null;
       resultsBody.innerHTML = `
         <tr id="emptyRow">
           <td colspan="4" class="py-12 text-center text-slate-400">
@@ -949,7 +1061,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
 
         tr.innerHTML = `
           <td class="py-4 px-5 font-medium text-slate-700">${escapeHtml(file.name)}</td>
-          <td colspan="3" class="py-4 px-5 text-slate-400 text-xs">กำลังอ่านค่า EXIF, สร้างภาพตัวอย่างความละเอียดสูง และประเมินเกรดคุณภาพ...</td>
+          <td colspan="3" class="py-4 px-5 text-slate-400 text-xs">กำลังอ่านค่า EXIF / MakerNotes เชิงลึก, สร้างภาพตัวอย่างความละเอียดสูง และประเมินเกรดคุณภาพ...</td>
         `;
         resultsBody.prepend(tr);
 
@@ -1074,13 +1186,13 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
 
         <td class="py-4 px-5 align-top text-xs text-slate-600 space-y-1">
           <div>รูรับแสง: <strong class="text-slate-800">${escapeHtml(fDisplay)}</strong> | ชัตเตอร์: <strong class="text-slate-800">${escapeHtml(shutterDisplay)}</strong></div>
-          <div>ทางยาวโฟกัส: <strong class="text-slate-800">${escapeHtml(focalDisplay)}</strong> | ISO: <strong class="text-slate-800">${escapeHtml(String(r.iso))}</strong></div>
+          <div>ทางยาวโฟกัส: <strong class="text-slate-800">${escapeHtml(focalDisplay)}</strong> | ISO: <strong class="text-slate-800">\${escapeHtml(String(r.iso))}</strong></div>
           <div class="pt-1 flex flex-wrap gap-1.5">
             <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-              AF Fine-tune: ${escapeHtml(r.af_fine_tune)}
+              AF Fine-tune: \${escapeHtml(r.af_fine_tune)}
             </span>
             <button onclick="switchMenu('menu2')" title="คลิกเพื่อดูรายละเอียดเกรดคุณภาพในเมนูที่ 2"
-                    class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold border ${gradeBadgeColor} hover:opacity-80 cursor-pointer">
+                    class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold border \${gradeBadgeColor} hover:opacity-80 cursor-pointer">
               Grade ${escapeHtml(gradeCode)} (${qScore}/100)
             </button>
           </div>
@@ -1090,26 +1202,26 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           <div class="flex items-baseline gap-3">
             <div>
               <span class="text-xs text-slate-400 block">จุดโฟกัสกล้อง</span>
-              <span class="text-xl font-bold text-blue-600">${r.af_sharpness}</span>
+              <span class="text-xl font-bold text-blue-600">\${r.af_sharpness}</span>
             </div>
             <span class="text-slate-300 font-bold">/</span>
             <div>
               <span class="text-xs text-slate-400 block">จุดที่ชัดที่สุด</span>
-              <span class="text-xl font-bold text-emerald-600">${r.peak_sharpness}</span>
+              <span class="text-xl font-bold text-emerald-600">\${r.peak_sharpness}</span>
             </div>
           </div>
-          <div class="text-xs font-bold mt-1 text-slate-800">${escapeHtml(r.quality)}</div>
-          <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(r.advice)}</div>
+          <div class="text-xs font-bold mt-1 text-slate-800">\${escapeHtml(r.quality)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">\${escapeHtml(r.advice)}</div>
         </td>
 
         <td class="py-4 px-5 align-top text-center">
           <div class="flex flex-col items-center gap-2">
             <!-- ภาพครอปตัวอย่างความละเอียดสูงในตาราง -->
             <div class="relative group cursor-pointer" onclick="openDetailModal('${rowId}', '${mode}')" title="คลิกเพื่อขยาย 100%–200% หรือเลือกครอปส่วนอื่น">
-              <img src="${displayCropImg}" alt="Sharpness Crop Sample"
-                   class="w-32 h-32 rounded-xl object-cover border-2 ${displayCropBorder} shadow-sm group-hover:scale-105 transition" />
+              <img src="\${displayCropImg}" alt="Sharpness Crop Sample"
+                   class="w-32 h-32 rounded-xl object-cover border-2 \${displayCropBorder} shadow-sm group-hover:scale-105 transition" />
               <span class="absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">
-                ${escapeHtml(displayCropTag)}
+                \${escapeHtml(displayCropTag)}
               </span>
               <span class="absolute bottom-1.5 right-1.5 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
                 🔍 ขยาย
@@ -1118,15 +1230,15 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
 
             <!-- ปุ่มสลับจุดตัวอย่างอย่างรวดเร็ว -->
             <div class="flex flex-wrap items-center justify-center gap-1 text-[11px]">
-              <button onclick="setRowCropPreset('${rowId}', 'peak')"
-                      class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition ${mode === 'peak' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
+              <button onclick="setRowCropPreset('\${rowId}', 'peak')"
+                      class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition \${mode === 'peak' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
                 จุดชัดสุด
               </button>
-              <button onclick="setRowCropPreset('${rowId}', 'af')"
-                      class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition ${mode === 'af' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
+              <button onclick="setRowCropPreset('\${rowId}', 'af')"
+                      class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition \${mode === 'af' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
                 จุดกล้อง
               </button>
-              ${r.custom_crop ? `
+              \${r.custom_crop ? `
                 <button onclick="setRowCropPreset('${rowId}', 'custom')"
                         class="px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition ${mode === 'custom' ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}">
                   ที่เลือกเอง
@@ -1135,7 +1247,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
             </div>
 
             <!-- ปุ่มเปิดเครื่องมือเลือกครอปส่วนที่อยู่ในตาราง -->
-            <button onclick="openDetailModal('${rowId}', 'custom')"
+            <button onclick="openDetailModal('\${rowId}', 'custom')"
                     class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition cursor-pointer">
               <span>✂️ เลือกครอปส่วนภาพ</span>
             </button>
@@ -1173,7 +1285,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
 
       document.getElementById('kpiAvgScore').textContent = avgScore;
       document.getElementById('kpiPassCount').textContent = passCount;
-      document.getElementById('kpiPassPct').textContent = `${Math.round((passCount / total) * 100)}% ของชุดภาพทั้งหมด`;
+      document.getElementById('kpiPassPct').textContent = `\${Math.round((passCount / total) * 100)}% ของชุดภาพทั้งหมด`;
       document.getElementById('kpiWarnCount').textContent = warnCount;
 
       const filterVal = document.getElementById('gradeFilter').value;
@@ -1185,7 +1297,7 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         document.getElementById('qualityTableBody').innerHTML = `
           <tr>
             <td colspan="4" class="py-10 text-center text-slate-400">
-              ไม่พบรายการภาพที่ตรงกับตัวกรอง "${escapeHtml(filterVal)}"
+              ไม่พบรายการภาพที่ตรงกับตัวกรอง "\${escapeHtml(filterVal)}"
             </td>
           </tr>
         `;
@@ -1215,20 +1327,20 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           <tr class="hover:bg-slate-50/80 transition">
             <td class="py-4 px-5 align-top">
               <div class="flex items-start gap-3">
-                <img src="${thumbSrc}" onclick="openDetailModal('${id}', '${r.active_crop_mode || 'peak'}')"
+                <img src="\${thumbSrc}" onclick="openDetailModal('${id}', '${r.active_crop_mode || 'peak'}')"
                      class="w-24 h-24 rounded-xl object-cover border border-slate-200 cursor-pointer shrink-0 hover:ring-2 hover:ring-indigo-500 transition" />
                 <div>
-                  <div class="font-bold text-slate-900">${escapeHtml(r.filename)}</div>
-                  <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(r.camera)} • ${escapeHtml(r.lens)}</div>
-                  <div class="text-xs text-slate-400 mt-0.5">f/${escapeHtml(r.f_number)} | ${escapeHtml(r.exposure_time)}s | ISO ${escapeHtml(String(r.iso))} | ${escapeHtml(r.focal_length)}mm</div>
+                  <div class="font-bold text-slate-900">\${escapeHtml(r.filename)}</div>
+                  <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(r.camera)} •${escapeHtml(r.lens)}</div>
+                  <div class="text-xs text-slate-400 mt-0.5">f/${escapeHtml(r.f_number)} |${escapeHtml(r.exposure_time)}s | ISO ${escapeHtml(String(r.iso))} |${escapeHtml(r.focal_length)}mm</div>
                 </div>
               </div>
             </td>
 
             <td class="py-4 px-5 align-top text-center">
-              <div class="text-2xl font-extrabold text-slate-900">${q.quality_score ?? '-'}<span class="text-xs font-normal text-slate-400">/100</span></div>
-              <span class="inline-block mt-1 px-2.5 py-1 rounded-full text-xs font-bold border ${pillStyle}">
-                ${escapeHtml(q.grade_label || '-')}
+              <div class="text-2xl font-extrabold text-slate-900">\${q.quality_score ?? '-'}<span class="text-xs font-normal text-slate-400">/100</span></div>
+              <span class="inline-block mt-1 px-2.5 py-1 rounded-full text-xs font-bold border \${pillStyle}">
+                \${escapeHtml(q.grade_label || '-')}
               </span>
             </td>
 
@@ -1236,37 +1348,37 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
               <div>
                 <div class="flex justify-between text-xs mb-0.5">
                   <span class="text-slate-600 font-medium">Focus &amp; Sharpness (50%)</span>
-                  <span class="font-bold text-indigo-700">${q.focus_index ?? 0}</span>
+                  <span class="font-bold text-indigo-700">\${q.focus_index ?? 0}</span>
                 </div>
                 <div class="w-full bg-slate-100 rounded-full h-1.5">
-                  <div class="bg-indigo-600 h-1.5 rounded-full" style="width: ${Math.min(100, q.focus_index ?? 0)}%"></div>
+                  <div class="bg-indigo-600 h-1.5 rounded-full" style="width: \${Math.min(100, q.focus_index ?? 0)}%"></div>
                 </div>
               </div>
               <div>
                 <div class="flex justify-between text-xs mb-0.5">
                   <span class="text-slate-600 font-medium">Contrast &amp; Exposure (30%)</span>
-                  <span class="font-bold text-emerald-700">${q.contrast_exposure_index ?? 0}</span>
+                  <span class="font-bold text-emerald-700">\${q.contrast_exposure_index ?? 0}</span>
                 </div>
                 <div class="w-full bg-slate-100 rounded-full h-1.5">
-                  <div class="bg-emerald-500 h-1.5 rounded-full" style="width: ${Math.min(100, q.contrast_exposure_index ?? 0)}%"></div>
+                  <div class="bg-emerald-500 h-1.5 rounded-full" style="width: \${Math.min(100, q.contrast_exposure_index ?? 0)}%"></div>
                 </div>
               </div>
               <div>
                 <div class="flex justify-between text-xs mb-0.5">
                   <span class="text-slate-600 font-medium">Technical Stability (20%)</span>
-                  <span class="font-bold text-amber-700">${q.stability_index ?? 0}</span>
+                  <span class="font-bold text-amber-700">\${q.stability_index ?? 0}</span>
                 </div>
                 <div class="w-full bg-slate-100 rounded-full h-1.5">
-                  <div class="bg-amber-500 h-1.5 rounded-full" style="width: ${Math.min(100, q.stability_index ?? 0)}%"></div>
+                  <div class="bg-amber-500 h-1.5 rounded-full" style="width: \${Math.min(100, q.stability_index ?? 0)}%"></div>
                 </div>
               </div>
               <div class="text-[11px] text-slate-400 pt-0.5">
-                Edge Density: ${tex.edge_density_pct ?? 0}% | Contrast: ${tex.contrast_std ?? 0} | ชัตเตอร์แนะนำ: ${escapeHtml(q.recommended_shutter || 'N/A')}
+                Edge Density: \${tex.edge_density_pct ?? 0}% | Contrast: ${tex.contrast_std ?? 0} | ชัตเตอร์แนะนำ: ${escapeHtml(q.recommended_shutter || 'N/A')}
               </div>
             </td>
 
             <td class="py-4 px-5 align-top space-y-1.5">
-              ${issuesHtml}
+              \${issuesHtml}
             </td>
           </tr>
         `;
@@ -1324,7 +1436,6 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
       const plotH = h - padT - padB;
       const maxVal = Math.max(1, ...hist.r, ...hist.g, ...hist.b);
 
-      // Grid lines
       ctx.strokeStyle = '#e2e8f0';
       ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
@@ -1422,7 +1533,6 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
         ctx.fillText(shortLbl, cx - 22, padT + plotH + 16);
       });
 
-      // Legend
       ctx.fillStyle = colorA;
       ctx.fillRect(padL, 6, 10, 10);
       ctx.fillStyle = '#1e293b';
@@ -1502,24 +1612,24 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
           <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
               <div>
-                <h3 class="text-base font-bold text-slate-900">🎯 ${escapeHtml(r.filename)}</h3>
-                <p class="text-xs text-slate-500">${escapeHtml(r.camera)} | ${escapeHtml(r.lens)} | พิกัดโฟกัส: ${escapeHtml(r.af_point)} (${escapeHtml(r.af_coords_text)})</p>
+                <h3 class="text-base font-bold text-slate-900">🎯 \${escapeHtml(r.filename)}</h3>
+                <p class="text-xs text-slate-500">${escapeHtml(r.camera)} |${escapeHtml(r.lens)} | พิกัดโฟกัส: ${escapeHtml(r.af_point)} (${escapeHtml(r.af_coords_text)})</p>
               </div>
               <div class="flex flex-wrap gap-2 text-xs">
                 <span class="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200">
-                  Edge Density: ${tex.edge_density_pct ?? 0}%
+                  Edge Density: \${tex.edge_density_pct ?? 0}%
                 </span>
                 <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">
-                  Sobel Gradient: ${tex.mean_gradient ?? 0}
+                  Sobel Gradient: \${tex.mean_gradient ?? 0}
                 </span>
                 <span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
-                  Contrast (Std): ${tex.contrast_std ?? 0}
+                  Contrast (Std): \${tex.contrast_std ?? 0}
                 </span>
-                <span class="px-2.5 py-1 rounded-lg font-semibold border ${hiWarn ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-600 border-slate-200'}">
-                  Highlight Clip: ${tex.highlight_clipping_pct ?? 0}%
+                <span class="px-2.5 py-1 rounded-lg font-semibold border \${hiWarn ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-600 border-slate-200'}">
+                  Highlight Clip: \${tex.highlight_clipping_pct ?? 0}%
                 </span>
-                <span class="px-2.5 py-1 rounded-lg font-semibold border ${shWarn ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-600 border-slate-200'}">
-                  Shadow Crush: ${tex.shadow_crushing_pct ?? 0}%
+                <span class="px-2.5 py-1 rounded-lg font-semibold border \${shWarn ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-600 border-slate-200'}">
+                  Shadow Crush: \${tex.shadow_crushing_pct ?? 0}%
                 </span>
               </div>
             </div>
@@ -1528,597 +1638,18 @@ print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
               <!-- Col 1: High-Res Focus ROI -->
               <div class="md:col-span-3 flex flex-col items-center">
                 <div class="text-xs font-bold text-slate-600 mb-2">1. ภาพพื้นที่จุดโฟกัส (Focus ROI)</div>
-                <img src="${tex.af_roi_image || ''}" alt="Focus ROI" class="w-60 h-60 object-cover rounded-xl border border-slate-200 shadow-xs" />
-                <span class="text-[11px] text-slate-400 mt-1.5">ความสว่างเฉลี่ย: ${tex.mean_brightness ?? 0} / 255</span>
+                <img src="\${tex.af_roi_image || ''}" alt="Focus ROI" class="w-60 h-60 object-cover rounded-xl border border-slate-200 shadow-xs" />
+                <span class="text-[11px] text-slate-400 mt-1.5">ความสว่างเฉลี่ย: \${tex.mean_brightness ?? 0} / 255</span>
               </div>
 
               <!-- Col 2: High-Res Canny Edge Map -->
               <div class="md:col-span-3 flex flex-col items-center">
                 <div class="text-xs font-bold text-slate-600 mb-2">2. แผนที่เส้นขอบ (Canny Edge Map)</div>
-                <img src="${tex.canny_edge_image || ''}" alt="Canny Edges" class="w-60 h-60 object-cover rounded-xl border border-slate-800 bg-black shadow-xs" />
-                <span class="text-[11px] text-slate-400 mt-1.5">สัดส่วนพิกเซลเส้นขอบ: ${tex.edge_density_pct ?? 0}%</span>
+                <img src="\${tex.canny_edge_image || ''}" alt="Canny Edges" class="w-60 h-60 object-cover rounded-xl border border-slate-800 bg-black shadow-xs" />
+                <span class="text-[11px] text-slate-400 mt-1.5">สัดส่วนพิกเซลเส้นขอบ: \${tex.edge_density_pct ?? 0}%</span>
               </div>
 
               <!-- Col 3: RGB Histogram -->
               <div class="md:col-span-6">
                 <div class="text-xs font-bold text-slate-600 mb-2">3. กราฟการกระจายแสง 3 ช่องสี (RGB Color Histogram — ROI)</div>
-                <div class="h-52 bg-slate-50/70 rounded-xl p-3 border border-slate-200 relative">
-                  <canvas id="histCanvas_${id}"></canvas>
-                </div>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      // วาดกราฟ RGB Histogram (ใช้ Chart.js เป็นหลัก และมี Canvas Fallback สำรองอัตโนมัติ)
-      items.forEach(({ id, r }) => {
-        const hist = r.texture?.rgb_histogram;
-        const canvas = document.getElementById('histCanvas_' + id);
-        if (!hist || !canvas) return;
-        try {
-          if (typeof Chart !== 'undefined') {
-            histCharts[id] = new Chart(canvas.getContext('2d'), {
-              type: 'line',
-              data: {
-                labels: hist.bins,
-                datasets: [
-                  { label: 'Red', data: hist.r, borderColor: 'rgba(239, 68, 68, 0.9)', backgroundColor: 'rgba(239, 68, 68, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
-                  { label: 'Green', data: hist.g, borderColor: 'rgba(16, 185, 129, 0.9)', backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
-                  { label: 'Blue', data: hist.b, borderColor: 'rgba(59, 130, 246, 0.9)', backgroundColor: 'rgba(59, 130, 246, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
-                ]
-              },
-              options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 11 } } } },
-                scales: {
-                  x: { title: { display: true, text: 'ระดับความสว่าง (0 = มืดสุด, 255 = สว่างสุด)', font: { size: 10 } }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
-                  y: { title: { display: true, text: 'สัดส่วนพิกเซล (%)', font: { size: 10 } }, ticks: { font: { size: 10 } }, beginAtZero: true }
-                }
-              }
-            });
-          } else {
-            drawFallbackHistogram(canvas, hist);
-          }
-        } catch (err) {
-          drawFallbackHistogram(canvas, hist);
-        }
-      });
-    }
-
-    // =========================================================================
-    // เมนูที่ 4: สถิติเปรียบเทียบและอภิข้อมูล MakerNotes เชิงลึก
-    // =========================================================================
-    function renderMenu4() {
-      const items = analyzedOrder.slice().reverse().map(id => analyzedStore[id]).filter(Boolean);
-      const emptyEl = document.getElementById('statsEmptyState');
-      const contentEl = document.getElementById('statsContent');
-
-      if (chartPerImage) { try { chartPerImage.destroy(); } catch (e) {} chartPerImage = null; }
-      if (chartIso) { try { chartIso.destroy(); } catch (e) {} chartIso = null; }
-      if (chartScatter) { try { chartScatter.destroy(); } catch (e) {} chartScatter = null; }
-
-      if (!items.length) {
-        emptyEl.classList.remove('hidden');
-        contentEl.classList.add('hidden');
-        return;
-      }
-
-      emptyEl.classList.add('hidden');
-      contentEl.classList.remove('hidden');
-
-      // คำนวณกลุ่ม ISO และเติมข้อมูลลงในตารางก่อนเสมอ (ป้องกัน Error จาก Chart ขัดขวางการแสดงผลตาราง)
-      const isoGroups = {};
-      items.forEach(r => {
-        const isoNum = parseInt(r.iso, 10);
-        const key = isNaN(isoNum) ? 'Unknown' : isoNum;
-        if (!isoGroups[key]) {
-          isoGroups[key] = { iso: key, count: 0, sumSharp: 0, sumEdge: 0, sumQuality: 0 };
-        }
-        isoGroups[key].count += 1;
-        isoGroups[key].sumSharp += Number(r.af_sharpness || 0);
-        isoGroups[key].sumEdge += Number(r.texture?.edge_density_pct || 0);
-        isoGroups[key].sumQuality += Number(r.quality_eval?.quality_score || 0);
-      });
-
-      const sortedIso = Object.values(isoGroups).sort((a, b) => {
-        if (a.iso === 'Unknown') return 1;
-        if (b.iso === 'Unknown') return -1;
-        return a.iso - b.iso;
-      });
-
-      // Populate ISO Summary Table
-      document.getElementById('isoGroupTableBody').innerHTML = sortedIso.map(g => `
-        <tr class="hover:bg-slate-50">
-          <td class="py-2.5 px-3 font-bold text-slate-800">${g.iso === 'Unknown' ? 'No EXIF' : 'ISO ' + g.iso}</td>
-          <td class="py-2.5 px-3 text-center">${g.count}</td>
-          <td class="py-2.5 px-3 text-right font-semibold text-teal-700">${Math.round(g.sumSharp / g.count)}</td>
-          <td class="py-2.5 px-3 text-right">${(g.sumEdge / g.count).toFixed(1)}%</td>
-          <td class="py-2.5 px-3 text-right font-bold text-indigo-700">${(g.sumQuality / g.count).toFixed(1)}</td>
-        </tr>
-      `).join('');
-
-      // Populate Deep MakerNotes Table
-      document.getElementById('deepMetadataBody').innerHTML = items.map(r => {
-        const d = r.deep_notes || {};
-        const rollStr = d.roll_angle !== null && d.roll_angle !== undefined ? `${d.roll_angle}°` : 'N/A';
-        const pitchStr = d.pitch_angle !== null && d.pitch_angle !== undefined ? `${d.pitch_angle}°` : 'N/A';
-        return `
-          <tr class="hover:bg-slate-50">
-            <td class="py-2.5 px-4 font-bold text-slate-900">${escapeHtml(r.filename)}</td>
-            <td class="py-2.5 px-4 text-slate-600">${escapeHtml(r.resolution || 'N/A')}</td>
-            <td class="py-2.5 px-4 font-medium text-indigo-700">${escapeHtml(d.focus_mode || 'N/A')}</td>
-            <td class="py-2.5 px-4">${escapeHtml(d.af_area_mode || 'N/A')}</td>
-            <td class="py-2.5 px-4">${escapeHtml(d.focus_distance_text || 'N/A')}</td>
-            <td class="py-2.5 px-4">Roll: ${escapeHtml(rollStr)} / Pitch: ${escapeHtml(pitchStr)}</td>
-            <td class="py-2.5 px-4">${escapeHtml(d.white_balance || 'N/A')}</td>
-            <td class="py-2.5 px-4">${escapeHtml(d.metering_mode || 'N/A')}</td>
-          </tr>
-        `;
-      }).join('');
-
-      // เตรียมข้อมูลสำหรับกราฟทั้ง 3 ชุด
-      const labels = items.map(r => r.filename.length > 18 ? r.filename.slice(0, 16) + '…' : r.filename);
-      const afSharpData = items.map(r => r.af_sharpness || 0);
-      const peakSharpData = items.map(r => r.peak_sharpness || 0);
-
-      const isoLabels = sortedIso.map(g => g.iso === 'Unknown' ? 'No ISO' : `ISO ${g.iso}`);
-      const isoAvgSharp = sortedIso.map(g => Math.round(g.sumSharp / g.count));
-      const isoAvgQuality = sortedIso.map(g => Number((g.sumQuality / g.count).toFixed(1)));
-
-      const scatterPoints = items.map(r => ({
-        x: r.texture?.edge_density_pct || 0,
-        y: r.af_sharpness || 0,
-        filename: r.filename
-      }));
-
-      // Chart 1: Per-Image AF Sharpness vs Peak Sharpness
-      const c1 = document.getElementById('chartPerImageSharpness');
-      try {
-        if (typeof Chart !== 'undefined') {
-          chartPerImage = new Chart(c1.getContext('2d'), {
-            type: 'bar',
-            data: {
-              labels,
-              datasets: [
-                { label: 'AF Point Sharpness', data: afSharpData, backgroundColor: 'rgba(59, 130, 246, 0.85)', borderRadius: 6 },
-                { label: 'Peak Sharpness', data: peakSharpData, backgroundColor: 'rgba(16, 185, 129, 0.85)', borderRadius: 6 }
-              ]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: { legend: { position: 'top' } },
-              scales: { y: { beginAtZero: true, title: { display: true, text: 'Laplacian Variance' } } }
-            }
-          });
-        } else {
-          drawFallbackGroupedBar(c1, labels, afSharpData, peakSharpData, 'AF Sharpness', 'Peak Sharpness', 'rgba(59, 130, 246, 0.85)', 'rgba(16, 185, 129, 0.85)');
-        }
-      } catch (e) {
-        drawFallbackGroupedBar(c1, labels, afSharpData, peakSharpData, 'AF Sharpness', 'Peak Sharpness', 'rgba(59, 130, 246, 0.85)', 'rgba(16, 185, 129, 0.85)');
-      }
-
-      // Chart 2: ISO Group Analysis
-      const c2 = document.getElementById('chartIsoGroup');
-      try {
-        if (typeof Chart !== 'undefined') {
-          chartIso = new Chart(c2.getContext('2d'), {
-            type: 'bar',
-            data: {
-              labels: isoLabels,
-              datasets: [
-                {
-                  label: 'เฉลี่ย AF Sharpness',
-                  data: isoAvgSharp,
-                  backgroundColor: 'rgba(13, 148, 136, 0.85)',
-                  borderRadius: 6,
-                  yAxisID: 'y'
-                },
-                {
-                  label: 'เฉลี่ย Quality Score (0-100)',
-                  data: isoAvgQuality,
-                  backgroundColor: 'rgba(99, 102, 241, 0.85)',
-                  borderRadius: 6,
-                  yAxisID: 'y1'
-                }
-              ]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              scales: {
-                y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Avg Sharpness' } },
-                y1: { type: 'linear', position: 'right', beginAtZero: true, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: 'Quality Score' } }
-              }
-            }
-          });
-        } else {
-          drawFallbackGroupedBar(c2, isoLabels, isoAvgSharp, isoAvgQuality, 'Avg Sharpness', 'Quality Score', 'rgba(13, 148, 136, 0.85)', 'rgba(99, 102, 241, 0.85)');
-        }
-      } catch (e) {
-        drawFallbackGroupedBar(c2, isoLabels, isoAvgSharp, isoAvgQuality, 'Avg Sharpness', 'Quality Score', 'rgba(13, 148, 136, 0.85)', 'rgba(99, 102, 241, 0.85)');
-      }
-
-      // Chart 3: Scatter Plot Edge Density vs Sharpness
-      const c3 = document.getElementById('chartEdgeScatter');
-      try {
-        if (typeof Chart !== 'undefined') {
-          chartScatter = new Chart(c3.getContext('2d'), {
-            type: 'scatter',
-            data: {
-              datasets: [{
-                label: 'ภาพถ่ายแต่ละใบ (Edge Density % vs Sharpness)',
-                data: scatterPoints,
-                backgroundColor: 'rgba(79, 70, 229, 0.85)',
-                pointRadius: 6,
-                pointHoverRadius: 8
-              }]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
-                tooltip: {
-                  callbacks: {
-                    label: (ctx) => `${ctx.raw.filename}: Edge ${ctx.raw.x}%, Sharpness ${ctx.raw.y}`
-                  }
-                }
-              },
-              scales: {
-                x: { title: { display: true, text: 'Edge Density (%)' }, beginAtZero: true },
-                y: { title: { display: true, text: 'AF Sharpness Score' }, beginAtZero: true }
-              }
-            }
-          });
-        } else {
-          drawFallbackScatter(c3, scatterPoints);
-        }
-      } catch (e) {
-        drawFallbackScatter(c3, scatterPoints);
-      }
-    }
-
-    // =========================================================================
-    // เมนูที่ 5: JSON & API Integration Preview
-    // =========================================================================
-    function renderMenu5() {
-      const previewEl = document.getElementById('latestJsonPreview');
-      if (!analyzedOrder.length) {
-        previewEl.textContent = JSON.stringify({ status: "รอการอัปโหลดไฟล์ภาพเพื่อแสดงตัวอย่าง JSON จริง..." }, null, 2);
-        return;
-      }
-      const latest = analyzedStore[analyzedOrder[0]];
-      const cleanPayload = {
-        filename: latest.filename,
-        camera: latest.camera,
-        lens: latest.lens,
-        resolution: latest.resolution,
-        exif: {
-          f_number: latest.f_number,
-          exposure_time: latest.exposure_time,
-          iso: latest.iso,
-          focal_length: latest.focal_length,
-          af_point: latest.af_point,
-          af_fine_tune: latest.af_fine_tune,
-          deep_notes: latest.deep_notes
-        },
-        metrics: {
-          af_sharpness: latest.af_sharpness,
-          peak_sharpness: latest.peak_sharpness,
-          sharpness_ratio_pct: latest.sharpness_ratio_pct,
-          focus_offset_pct: latest.focus_offset_pct,
-          edge_density_pct: latest.texture?.edge_density_pct,
-          mean_gradient: latest.texture?.mean_gradient,
-          contrast_std: latest.texture?.contrast_std,
-          highlight_clipping_pct: latest.texture?.highlight_clipping_pct,
-          shadow_crushing_pct: latest.texture?.shadow_crushing_pct
-        },
-        quality_evaluation: latest.quality_eval
-      };
-      previewEl.textContent = JSON.stringify(cleanPayload, null, 2);
-    }
-
-    function copyLatestJson() {
-      const text = document.getElementById('latestJsonPreview').textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        alert('คัดลอกข้อมูล JSON เรียบร้อยแล้ว');
-      });
-    }
-
-    // =========================================================================
-    // Interactive Crop & High-Res Detail Modal (เลือกครอปส่วนภาพมาแสดงในตาราง)
-    // =========================================================================
-    function computeCanvasLaplacianVariance(ctx, w, h) {
-      const imgData = ctx.getImageData(0, 0, w, h).data;
-      const gray = new Float32Array(w * h);
-      for (let i = 0, j = 0; i < imgData.length; i += 4, j++) {
-        gray[j] = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
-      }
-      let sum = 0, sumSq = 0, count = 0;
-      for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
-          const idx = y * w + x;
-          const lap = gray[idx - w] + gray[idx - 1] - 4 * gray[idx] + gray[idx + 1] + gray[idx + w];
-          sum += lap;
-          sumSq += lap * lap;
-          count++;
-        }
-      }
-      if (count === 0) return 0;
-      const mean = sum / count;
-      return Math.max(0, Math.round((sumSq / count - mean * mean) * 10) / 10);
-    }
-
-    function performCropFromCleanImage(normX, normY, normW, normH, labelPrefix) {
-      if (!cleanSourceImgObj || !cleanSourceImgObj.naturalWidth) return;
-      const natW = cleanSourceImgObj.naturalWidth;
-      const natH = cleanSourceImgObj.naturalHeight;
-
-      const sx = Math.max(0, Math.min(natW - 20, Math.round(normX * natW)));
-      const sy = Math.max(0, Math.min(natH - 20, Math.round(normY * natH)));
-      const sw = Math.max(40, Math.min(natW - sx, Math.round(normW * natW)));
-      const sh = Math.max(40, Math.min(natH - sy, Math.round(normH * natH)));
-
-      const offCanvas = document.createElement('canvas');
-      offCanvas.width = sw;
-      offCanvas.height = sh;
-      const offCtx = offCanvas.getContext('2d');
-      offCtx.drawImage(cleanSourceImgObj, sx, sy, sw, sh, 0, 0, sw, sh);
-
-      const sharpnessVal = computeCanvasLaplacianVariance(offCtx, sw, sh);
-      const dataUrl = offCanvas.toDataURL('image/jpeg', 0.95);
-      const cxPct = Math.round(((sx + sw / 2) / natW) * 100);
-      const cyPct = Math.round(((sy + sh / 2) / natH) * 100);
-      const coordsText = `X:${cxPct}%, Y:${cyPct}%`;
-
-      pendingCustomCrop = {
-        dataUrl,
-        coordsText,
-        sharpness: sharpnessVal,
-        normRect: { x: normX, y: normY, w: normW, h: normH }
-      };
-
-      document.getElementById('modalCropImg').src = dataUrl;
-      document.getElementById('modalCropModeLabel').innerHTML = `<span>✂️</span> ภาพครอปที่เลือกเอง (${coordsText})`;
-      document.getElementById('modalCropInfoText').textContent = `${labelPrefix} (${coordsText} • ขนาด ${sw}×${sh}px)`;
-      document.getElementById('modalCropSharpnessInfo').textContent = `ดัชนีคอนทราสต์/ความคมชัดเฉพาะส่วนที่เลือก: ${sharpnessVal}`;
-
-      updateSelectionBoxVisual(normX, normY, normW, normH, `${labelPrefix} (${coordsText})`);
-    }
-
-    function updateSelectionBoxVisual(normX, normY, normW, normH, labelText) {
-      const stage = document.getElementById('cropStage');
-      const box = document.getElementById('cropSelectionBox');
-      const lbl = document.getElementById('cropSelectionLabel');
-      const stageW = stage.clientWidth;
-      const stageH = stage.clientHeight;
-      if (!stageW || !stageH) return;
-
-      box.style.left = `${normX * stageW}px`;
-      box.style.top = `${normY * stageH}px`;
-      box.style.width = `${normW * stageW}px`;
-      box.style.height = `${normH * stageH}px`;
-      lbl.textContent = labelText;
-      box.classList.remove('hidden');
-    }
-
-    function setCropBoxRatio(ratio) {
-      cropBoxRatio = ratio;
-      if (pendingCustomCrop && pendingCustomCrop.normRect) {
-        const cx = pendingCustomCrop.normRect.x + pendingCustomCrop.normRect.w / 2;
-        const cy = pendingCustomCrop.normRect.y + pendingCustomCrop.normRect.h / 2;
-        const nw = Math.min(0.95, ratio);
-        const nh = Math.min(0.95, ratio);
-        const nx = Math.max(0, Math.min(1 - nw, cx - nw / 2));
-        const ny = Math.max(0, Math.min(1 - nh, cy - nh / 2));
-        performCropFromCleanImage(nx, ny, nw, nh, 'ส่วนที่เลือก');
-      }
-    }
-
-    function selectPresetCrop(preset) {
-      const r = analyzedStore[currentModalRowId];
-      if (!r) return;
-      currentCropPreset = preset;
-
-      if (preset === 'peak') {
-        pendingCustomCrop = null;
-        document.getElementById('modalCropImg').src = r.sharpest_crop_image;
-        document.getElementById('modalCropModeLabel').innerHTML = `<span>🔍</span> จุดที่คมชัดที่สุด (Peak Sharpness 100% Crop)`;
-        document.getElementById('modalCropInfoText').textContent = `จุดที่คมชัดที่สุด (${r.peak_coords_text})`;
-        document.getElementById('modalCropSharpnessInfo').textContent = `ค่าความคมชัด Peak Sharpness: ${r.peak_sharpness}`;
-        if (r.peak_norm_coords) {
-          const nw = cropBoxRatio, nh = cropBoxRatio;
-          const nx = Math.max(0, Math.min(1 - nw, r.peak_norm_coords.x / 100 - nw / 2));
-          const ny = Math.max(0, Math.min(1 - nh, r.peak_norm_coords.y / 100 - nh / 2));
-          updateSelectionBoxVisual(nx, ny, nw, nh, `จุดชัดสุด (${r.peak_coords_text})`);
-        }
-      } else if (preset === 'af') {
-        pendingCustomCrop = null;
-        document.getElementById('modalCropImg').src = r.af_crop_image || r.sharpest_crop_image;
-        document.getElementById('modalCropModeLabel').innerHTML = `<span>🎯</span> จุดโฟกัสกล้อง (Camera AF Point 100% Crop)`;
-        document.getElementById('modalCropInfoText').textContent = `จุดโฟกัสกล้อง ${r.af_point} (${r.af_coords_text})`;
-        document.getElementById('modalCropSharpnessInfo').textContent = `ค่าความคมชัด AF Point Sharpness: ${r.af_sharpness}`;
-        if (r.af_norm_coords) {
-          const nw = cropBoxRatio, nh = cropBoxRatio;
-          const nx = Math.max(0, Math.min(1 - nw, r.af_norm_coords.x / 100 - nw / 2));
-          const ny = Math.max(0, Math.min(1 - nh, r.af_norm_coords.y / 100 - nh / 2));
-          updateSelectionBoxVisual(nx, ny, nw, nh, `จุด AF (${r.af_coords_text})`);
-        }
-      } else if (preset === 'center') {
-        const nw = cropBoxRatio, nh = cropBoxRatio;
-        performCropFromCleanImage(0.5 - nw / 2, 0.5 - nh / 2, nw, nh, 'กึ่งกลางภาพ');
-      }
-    }
-
-    function applySelectedCropToTable() {
-      const r = analyzedStore[currentModalRowId];
-      const tr = document.getElementById(currentModalRowId);
-      if (!r || !tr) return;
-
-      if (pendingCustomCrop) {
-        r.custom_crop = pendingCustomCrop;
-        r.active_crop_mode = 'custom';
-      } else {
-        r.active_crop_mode = currentCropPreset === 'af' ? 'af' : 'peak';
-      }
-
-      renderResultRow(tr, currentModalRowId, r);
-      if (activeMenu === 'menu2') renderMenu2();
-      closeModal();
-    }
-
-    function downloadCurrentCrop() {
-      const r = analyzedStore[currentModalRowId];
-      const src = document.getElementById('modalCropImg').src;
-      if (!src) return;
-      const a = document.createElement('a');
-      a.href = src;
-      const baseName = (r?.filename || 'sample').replace(/\.[^.]+$/, '');
-      a.download = `${baseName}_crop_preview.jpg`;
-      a.click();
-    }
-
-    function toggleCropSourceOverlay() {
-      const r = analyzedStore[currentModalRowId];
-      if (!r) return;
-      const showOverlay = document.getElementById('toggleOverlayCheckbox').checked;
-      document.getElementById('modalFullImg').src = showOverlay
-        ? r.annotated_image
-        : (r.clean_preview_image || r.annotated_image);
-    }
-
-    // Pointer Events สำหรับลากกรอบครอปบนภาพต้นฉบับ
-    const cropStage = document.getElementById('cropStage');
-    cropStage.addEventListener('pointerdown', (e) => {
-      const rect = cropStage.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      isDraggingCrop = true;
-      cropStage.setPointerCapture(e.pointerId);
-      dragStartPos = {
-        x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
-        y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
-      };
-    });
-
-    cropStage.addEventListener('pointermove', (e) => {
-      if (!isDraggingCrop) return;
-      const rect = cropStage.getBoundingClientRect();
-      const curX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const curY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-      const nx = Math.min(dragStartPos.x, curX);
-      const ny = Math.min(dragStartPos.y, curY);
-      const nw = Math.abs(curX - dragStartPos.x);
-      const nh = Math.abs(curY - dragStartPos.y);
-      if (nw > 0.02 && nh > 0.02) {
-        updateSelectionBoxVisual(nx, ny, nw, nh, 'กำลังลากเลือกพื้นที่...');
-      }
-    });
-
-    cropStage.addEventListener('pointerup', (e) => {
-      if (!isDraggingCrop) return;
-      isDraggingCrop = false;
-      const rect = cropStage.getBoundingClientRect();
-      const curX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const curY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-      const dx = Math.abs(curX - dragStartPos.x);
-      const dy = Math.abs(curY - dragStartPos.y);
-
-      currentCropPreset = 'custom';
-      if (dx < 0.03 || dy < 0.03) {
-        // คลิกจุดเดียว -> ครอปกรอบขนาด cropBoxRatio รอบจุดที่คลิก
-        const nw = cropBoxRatio;
-        const nh = cropBoxRatio;
-        const nx = Math.max(0, Math.min(1 - nw, curX - nw / 2));
-        const ny = Math.max(0, Math.min(1 - nh, curY - nh / 2));
-        performCropFromCleanImage(nx, ny, nw, nh, 'ครอปจุดที่คลิก');
-      } else {
-        // ลากกรอบ -> ครอปตามสี่เหลี่ยมที่ลาก
-        const nx = Math.min(dragStartPos.x, curX);
-        const ny = Math.min(dragStartPos.y, curY);
-        performCropFromCleanImage(nx, ny, dx, dy, 'ครอปกรอบที่ลาก');
-      }
-    });
-
-    function openDetailModal(rowId, initialMode) {
-      const r = analyzedStore[rowId];
-      if (!r) return;
-
-      currentModalRowId = rowId;
-      pendingCustomCrop = null;
-
-      document.getElementById('modalTitle').textContent = `${r.filename} — ตรวจสอบรายละเอียดความคมชัดและเลือกครอปภาพตัวอย่าง`;
-      document.getElementById('modalSubtitle').textContent = `${r.camera} | ${r.lens} | ความละเอียดต้นฉบับ: ${r.resolution || '-'} | พิกัดกล้อง: ${r.af_point}`;
-
-      // โหลดภาพต้นฉบับสะอาดสำหรับใช้ครอปส่วนภาพ
-      const cleanSrc = r.clean_preview_image || r.annotated_image;
-      cleanSourceImgObj = new Image();
-      cleanSourceImgObj.src = cleanSrc;
-
-      document.getElementById('toggleOverlayCheckbox').checked = false;
-      document.getElementById('modalFullImg').src = cleanSrc;
-
-      document.getElementById('modalAfSharpness').textContent = r.af_sharpness;
-      document.getElementById('modalAfCoords').textContent = `พิกัดกล้อง (${r.af_point}): ${r.af_coords_text}`;
-      document.getElementById('modalPeakSharpness').textContent = r.peak_sharpness;
-      document.getElementById('modalPeakCoords').textContent = `พิกัดจุดชัดสุด: ${r.peak_coords_text}`;
-      document.getElementById('modalOffset').textContent = `${r.focus_status} (สัดส่วนความคมชัด ${r.sharpness_ratio_pct}%)`;
-      document.getElementById('modalAfTune').textContent = r.af_fine_tune;
-      document.getElementById('modalAdvice').textContent = `${r.quality} — ${r.advice}`;
-
-      setCropZoom(1);
-      document.getElementById('detailModal').classList.remove('hidden');
-
-      setTimeout(() => {
-        if (initialMode === 'custom' && r.custom_crop) {
-          pendingCustomCrop = r.custom_crop;
-          document.getElementById('modalCropImg').src = r.custom_crop.dataUrl;
-          document.getElementById('modalCropModeLabel').innerHTML = `<span>✂️</span> ภาพครอปที่เลือกเอง (${r.custom_crop.coordsText})`;
-          document.getElementById('modalCropInfoText').textContent = `ครอปที่เลือกไว้ (${r.custom_crop.coordsText})`;
-          document.getElementById('modalCropSharpnessInfo').textContent = `ดัชนีคอนทราสต์/ความคมชัดเฉพาะส่วนที่เลือก: ${r.custom_crop.sharpness}`;
-          const nr = r.custom_crop.normRect;
-          if (nr) updateSelectionBoxVisual(nr.x, nr.y, nr.w, nr.h, `ที่เลือกไว้ (${r.custom_crop.coordsText})`);
-        } else if (initialMode === 'af') {
-          selectPresetCrop('af');
-        } else {
-          selectPresetCrop('peak');
-        }
-      }, 60);
-    }
-
-    function closeModal() {
-      document.getElementById('detailModal').classList.add('hidden');
-    }
-
-    function setCropZoom(scale) {
-      const img = document.getElementById('modalCropImg');
-      img.style.transform = `scale(${scale})`;
-      document.querySelectorAll('.zoom-btn').forEach(btn => {
-        const z = parseFloat(btn.getAttribute('data-zoom'));
-        if (z === scale) {
-          btn.classList.add('bg-white', 'shadow-sm', 'text-indigo-600');
-          btn.classList.remove('text-slate-600');
-        } else {
-          btn.classList.remove('bg-white', 'shadow-sm', 'text-indigo-600');
-          btn.classList.add('text-slate-600');
-        }
-      });
-    }
-
-    document.getElementById('detailModal').addEventListener('click', (e) => {
-      if (e.target.id === 'detailModal') closeModal();
-    });
-
-    function escapeHtml(str) {
-      if (str === null || str === undefined) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
-  </script>
-</body>
-</html>
+                <div class="
