@@ -8,6 +8,7 @@ import logging
 import subprocess
 import cv2
 import numpy as np
+from typing import Optional, Tuple
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def parse_float(val) -> float | None:
+def parse_float(val) -> Optional[float]:
     if val is None:
         return None
     if isinstance(val, (int, float)):
@@ -39,7 +40,7 @@ def parse_float(val) -> float | None:
             pass
     return None
 
-def parse_lens_info(lens_info_str) -> tuple[float | None, float | None, float | None, float | None]:
+def parse_lens_info(lens_info_str) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
     if not lens_info_str:
         return None, None, None, None
     nums = [float(n) for n in re.findall(r'[\d.]+', str(lens_info_str))]
@@ -286,9 +287,7 @@ def process_image_and_sharpness(file_path: str, metadata: dict, iso_val):
     af_point_text, raw_cx, raw_cy = parse_nikon_precise_af(metadata, w, h)
     opt_cx, opt_cy = find_optimal_sharpness_peak(denoised_gray, raw_cx, raw_cy, search_radius=min(w, h)//5)
     
-    # === การจัดองค์ประกอบภาพ: ตรวจจับใบหน้าและบุคคล (ปรับความไวสูงขึ้น) ===
     faces = []
-    
     face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
     if os.path.exists(face_cascade_path):
         face_cascade = cv2.CascadeClassifier(face_cascade_path)
