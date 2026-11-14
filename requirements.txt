@@ -1,8 +1,9 @@
-streamlit
-rawpy
+fastapi
+uvicorn
+piexif
+Pillow
 opencv-python-headless
-pyexiftool
-matplotlib
-pandas
 numpy
-seaborn
+pandas
+matplotlib
+python-multipart

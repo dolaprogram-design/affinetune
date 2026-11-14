@@ -1,8 +1,6 @@
 services:
   - type: web
-    name: raw-image-analytics
+    name: lens-calibration-api
     env: docker
-    region: singapore # สามารถเปลี่ยนเป็น frankfurt หรือ oregon ได้
     plan: free
-    branch: main
-    port: 8501
+    autoDeploy: true
