@@ -3,53 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics</title>
+  <title>Pro Lens & Camera Optical Sharpness & Quality Analytics v2.0</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; }
     .crop-zoom-container { overflow: auto; max-height: 70vh; }
     .crop-zoom-img { transition: transform 0.2s ease; transform-origin: top left; }
-    .menu-tab-active {
+    .menu-tab { transition: all 0.18s ease; }
+    .menu-tab.active {
       background-color: #4f46e5;
       color: #ffffff;
       box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
     }
-    .menu-tab-inactive {
-      background-color: #ffffff;
-      color: #475569;
-    }
-    .menu-tab-inactive:hover {
-      background-color: #f1f5f9;
-      color: #1e293b;
+    .menu-tab:not(.active):hover {
+      background-color: #eef2ff;
+      color: #4338ca;
     }
   </style>
 </head>
 <body class="text-slate-800 antialiased">
 
-  <div class="max-w-7xl mx-auto px-4 py-8">
-    <!-- Header & Upload Panel (คงการทำงานเดิมครบถ้วน และส่งข้อมูลต่อไปยังทุกเมนู) -->
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <!-- Header & Upload Panel (ใช้ร่วมกันทุกเมนู) -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-5">
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <span>🔬</span> ระบบวิเคราะห์ความคมชัดเชิงแสง สอบเทียบจุดโฟกัส &amp; ประเมินคุณภาพภาพถ่าย
-          </h1>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+              <span>🔬</span> ระบบวิเคราะห์ความคมชัดเชิงแสง &amp; ประเมินคุณภาพภาพถ่าย (Optical AF &amp; Quality Analytics)
+            </h1>
+            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">v2.0 Multi-Menu</span>
+          </div>
           <p class="text-sm text-slate-500 mt-1">
-            สกัดข้อมูล EXIF / MakerNotes / AF Fine-tune จริงจากไฟล์ RAW (.NEF, .CR2, .CR3, .ARW, .DNG) และ JPG พร้อมระบบให้คะแนนคุณภาพและสถิติเชิงลึก 5 เมนู
+            สกัดข้อมูล EXIF / AF Fine-tune จริงจากไฟล์ RAW (.NEF, .CR2, .CR3, .ARW, .DNG) และ JPG พร้อมระบบจัดเกรดคุณภาพ วิเคราะห์ Edge/Histogram และสถิติเชิงลึก
           </p>
         </div>
-        <div class="flex flex-wrap items-center gap-2.5">
-          <button id="exportCsvBtn" onclick="exportAllCsv()" disabled
-                  class="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold px-4 py-3 rounded-xl shadow-sm transition text-sm">
-            <span>📥 ส่งออกรายงาน CSV</span>
-          </button>
-          <button id="clearDataBtn" onclick="clearAllRecords()" disabled
-                  class="inline-flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 text-slate-600 font-semibold px-4 py-3 rounded-xl border border-slate-200 transition text-sm">
+        <div class="flex items-center gap-2.5 shrink-0">
+          <button id="clearAllBtn" onclick="clearAllResults()" class="hidden cursor-pointer inline-flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-semibold px-4 py-3 rounded-xl border border-slate-200 transition text-sm">
             <span>🗑️ ล้างข้อมูล</span>
           </button>
-          <label class="cursor-pointer inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-3 rounded-xl shadow-sm transition text-sm">
+          <label class="cursor-pointer inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-3 rounded-xl shadow-sm transition">
             <span>📁 เลือกไฟล์ภาพเพื่อตรวจสอบ</span>
             <input id="fileInput" type="file" multiple accept="image/*,.nef,.NEF,.cr2,.CR2,.cr3,.CR3,.arw,.ARW,.dng,.DNG" class="hidden" />
           </label>
@@ -57,41 +52,52 @@
       </div>
 
       <!-- Dropzone -->
-      <div id="dropZone" class="mt-5 border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-5 text-center transition bg-slate-50/70 cursor-pointer">
-        <p class="text-slate-600 font-medium">ลากไฟล์ภาพมาวางที่นี่ หรือคลิกเพื่อเลือกหลายไฟล์พร้อมกัน (อัปโหลดครั้งเดียว ใช้งานได้ครบทั้ง 5 เมนู)</p>
-        <p class="text-xs text-slate-400 mt-1">รองรับ Nikon, Canon, Sigma, Tamron, Samyang, Tokina (.NEF, .CR2, .CR3, .ARW, .DNG, .JPG)</p>
+      <div id="dropZone" class="mt-4 border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-5 text-center transition bg-slate-50/70 cursor-pointer">
+        <p class="text-slate-600 font-medium">ลากไฟล์ภาพมาวางที่นี่ หรือคลิกเพื่อเลือกหลายไฟล์พร้อมกัน (ข้อมูลจะซิงก์เข้าสู่ทุกเมนูอัตโนมัติ)</p>
+        <p class="text-xs text-slate-400 mt-1">รองรับ Nikon, Canon, Sony, Fujifilm, Sigma, Tamron, Samyang, Tokina (.NEF, .CR2, .CR3, .ARW, .DNG, .JPG)</p>
       </div>
     </div>
 
-    <!-- Navigation Menu Bar (เมนูที่ 1 - เมนูที่ 5) -->
-    <div class="bg-slate-200/70 p-1.5 rounded-2xl mb-6 flex flex-wrap gap-1.5 border border-slate-200/80">
-      <button onclick="switchMenu(1)" id="tabBtn1" class="menu-tab-active flex-1 min-w-[180px] py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1.5">
-        <span>🔬</span> 1. วิเคราะห์จุดโฟกัส &amp; ความคมชัด
-      </button>
-      <button onclick="switchMenu(2)" id="tabBtn2" class="menu-tab-inactive flex-1 min-w-[180px] py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1.5">
-        <span>🏆</span> 2. ประเมินเกรด &amp; คัดกรองคุณภาพ
-      </button>
-      <button onclick="switchMenu(3)" id="tabBtn3" class="menu-tab-inactive flex-1 min-w-[180px] py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1.5">
-        <span>📐</span> 3. เส้นขอบ (Edge) &amp; ฮิสโตแกรม
-      </button>
-      <button onclick="switchMenu(4)" id="tabBtn4" class="menu-tab-inactive flex-1 min-w-[180px] py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1.5">
-        <span>📊</span> 4. เปรียบเทียบพารามิเตอร์ &amp; จูนเลนส์
-      </button>
-      <button onclick="switchMenu(5)" id="tabBtn5" class="menu-tab-inactive flex-1 min-w-[180px] py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-1.5">
-        <span>📈</span> 5. สถิติสหสัมพันธ์ &amp; เสถียรภาพ
-      </button>
+    <!-- Navigation Menu Bar -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-2 mb-6 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center gap-1.5" role="tablist">
+        <button id="tabBtn-menu1" onclick="switchMenu('menu1')" class="menu-tab active px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2">
+          <span>🔬</span>
+          <span>1. สอบเทียบจุดโฟกัส &amp; ความคมชัด</span>
+        </button>
+        <button id="tabBtn-menu2" onclick="switchMenu('menu2')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+          <span>🏆</span>
+          <span>2. ประเมินคุณภาพ &amp; จัดเกรดภาพ</span>
+          <span id="badgeMenu2" class="hidden text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">0</span>
+        </button>
+        <button id="tabBtn-menu3" onclick="switchMenu('menu3')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+          <span>📐</span>
+          <span>3. เส้นขอบ (Edge) &amp; ฮิสโตแกรม</span>
+        </button>
+        <button id="tabBtn-menu4" onclick="switchMenu('menu4')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+          <span>📈</span>
+          <span>4. สถิติเปรียบเทียบ &amp; MakerNotes</span>
+        </button>
+        <button id="tabBtn-menu5" onclick="switchMenu('menu5')" class="menu-tab px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 flex items-center gap-2">
+          <span>🔌</span>
+          <span>5. API / JSON</span>
+        </button>
+      </div>
+      <div class="px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50/70 rounded-lg" id="progressText">
+        พร้อมใช้งาน
+      </div>
     </div>
 
     <!-- ===================================================================== -->
-    <!-- เมนูที่ 1: ระบบวิเคราะห์ความคมชัดเชิงแสง & สอบเทียบจุดโฟกัส (เดิม)      -->
+    <!-- เมนูที่ 1: ระบบเดิม (Optical AF Calibration & Peak Sharpness Comparison) -->
     <!-- ===================================================================== -->
-    <div id="menuSection1" class="menu-section">
+    <section id="section-menu1" class="menu-section">
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+        <div class="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 bg-slate-50/50">
           <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <span>📊</span> รายงานสรุปผลวิเคราะห์พารามิเตอร์และความคมชัด (เมนูที่ 1)
+            <span>📊</span> รายงานสรุปผลวิเคราะห์พารามิเตอร์และความคมชัดเชิงแสง (เมนูหลัก)
           </h2>
-          <span id="progressText" class="text-sm font-semibold text-indigo-600">พร้อมใช้งาน</span>
+          <span class="text-xs text-slate-500">คลิกที่ภาพ Crop เพื่อขยายตรวจสอบรายละเอียด 100%–200%</span>
         </div>
 
         <div class="overflow-x-auto">
@@ -114,311 +120,239 @@
           </table>
         </div>
       </div>
-    </div>
+    </section>
 
     <!-- ===================================================================== -->
-    <!-- เมนูที่ 2: ระบบประเมินเกรดคุณภาพภาพ & คัดกรองอัตโนมัติ (Quality Triage)  -->
+    <!-- เมนูที่ 2: ระบบประเมินและจัดเกรดคุณภาพภาพถ่าย (Photo Quality Scoring)   -->
     <!-- ===================================================================== -->
-    <div id="menuSection2" class="menu-section hidden space-y-6">
-      <!-- KPI Summary Cards -->
+    <section id="section-menu2" class="menu-section hidden space-y-6">
+      <!-- Summary KPI Cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <div class="text-xs font-semibold text-slate-500 uppercase">จำนวนภาพที่วิเคราะห์ทั้งหมด</div>
-          <div id="kpiTotalPhotos" class="text-3xl font-bold text-slate-900 mt-1">0</div>
-          <div class="text-xs text-slate-400 mt-1">ไฟล์ในชุดข้อมูลปัจจุบัน</div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div class="text-xs font-semibold text-slate-400 uppercase">ภาพที่ประเมินทั้งหมด</div>
+          <div id="kpiTotalCount" class="text-3xl font-bold text-slate-900 mt-1">0</div>
+          <div class="text-xs text-slate-500 mt-1">ไฟล์ในชุดข้อมูลปัจจุบัน</div>
         </div>
-        <div class="bg-white rounded-2xl p-5 border border-emerald-200 shadow-sm">
-          <div class="text-xs font-semibold text-emerald-700 uppercase">ภาพเกรด A (ดีเยี่ยม / พร้อมใช้)</div>
-          <div id="kpiGradeACount" class="text-3xl font-bold text-emerald-600 mt-1">0</div>
-          <div id="kpiGradeAPct" class="text-xs text-emerald-600/80 mt-1">0% ของภาพทั้งหมด</div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div class="text-xs font-semibold text-slate-400 uppercase">คะแนนคุณภาพเฉลี่ย</div>
+          <div id="kpiAvgScore" class="text-3xl font-bold text-indigo-600 mt-1">-</div>
+          <div class="text-xs text-slate-500 mt-1">เต็ม 100 คะแนน (Composite Score)</div>
         </div>
-        <div class="bg-white rounded-2xl p-5 border border-indigo-200 shadow-sm">
-          <div class="text-xs font-semibold text-indigo-700 uppercase">คะแนนคุณภาพเฉลี่ยรวม</div>
-          <div id="kpiAvgScore" class="text-3xl font-bold text-indigo-600 mt-1">0.0</div>
-          <div class="text-xs text-slate-400 mt-1">เต็ม 100 คะแนน (Focus + Exposure + Stability)</div>
+        <div class="bg-white rounded-2xl border border-emerald-200 bg-emerald-50/30 p-5 shadow-sm">
+          <div class="text-xs font-semibold text-emerald-700 uppercase">ผ่านเกณฑ์ใช้งาน (Grade A / B)</div>
+          <div id="kpiPassCount" class="text-3xl font-bold text-emerald-600 mt-1">0</div>
+          <div id="kpiPassPct" class="text-xs text-emerald-700 mt-1">0% ของชุดภาพทั้งหมด</div>
         </div>
-        <div class="bg-white rounded-2xl p-5 border border-rose-200 shadow-sm">
-          <div class="text-xs font-semibold text-rose-700 uppercase">ภาพที่พบข้อสังเกต / ไม่ผ่านเกณฑ์</div>
-          <div id="kpiFlaggedCount" class="text-3xl font-bold text-rose-600 mt-1">0</div>
-          <div class="text-xs text-rose-500 mt-1">Focus Shift / Motion Blur / Out-of-Focus</div>
+        <div class="bg-white rounded-2xl border border-amber-200 bg-amber-50/30 p-5 shadow-sm">
+          <div class="text-xs font-semibold text-amber-700 uppercase">ควรตรวจสอบ / คัดออก (Grade C / D)</div>
+          <div id="kpiWarnCount" class="text-3xl font-bold text-amber-600 mt-1">0</div>
+          <div class="text-xs text-amber-700 mt-1">พบ Focus Shift, เบลอ หรือแสงล้น</div>
         </div>
       </div>
 
-      <!-- Grade Filter & Quality Table -->
+      <!-- Quality Scoring Table & Filter -->
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+        <div class="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
           <div>
-            <h2 class="text-lg font-bold text-slate-800">🏆 ตารางประเมินเกรดคุณภาพภาพถ่ายอัตโนมัติ (Composite Quality Scoring)</h2>
-            <p class="text-xs text-slate-500">คำนวณคะแนนถ่วงน้ำหนัก: ความคมชัดและจุดโฟกัส (50%) + คอนทราสต์และการวัดแสง (30%) + เสถียรภาพชัตเตอร์และ ISO (20%)</p>
+            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <span>🏆</span> ตารางประเมินคะแนนคุณภาพรวมและคัดกรองข้อบกพร่องอัตโนมัติ
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">
+              คำนวณคะแนนถ่วงน้ำหนัก: Focus &amp; Sharpness (50%) + Contrast &amp; Exposure (30%) + Technical Stability (20%)
+            </p>
           </div>
-          <div class="flex flex-wrap gap-1.5 text-xs">
-            <button onclick="filterGrade('ALL')" class="grade-filter-btn px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white" data-grade="ALL">ทั้งหมด</button>
-            <button onclick="filterGrade('A')" class="grade-filter-btn px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-700" data-grade="A">เกรด A</button>
-            <button onclick="filterGrade('B')" class="grade-filter-btn px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-700" data-grade="B">เกรด B</button>
-            <button onclick="filterGrade('C')" class="grade-filter-btn px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-700" data-grade="C">เกรด C</button>
-            <button onclick="filterGrade('Reject')" class="grade-filter-btn px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-700" data-grade="Reject">ไม่ผ่านเกณฑ์</button>
+          <div class="flex flex-wrap items-center gap-2">
+            <select id="gradeFilter" onchange="renderMenu2()" class="text-xs font-semibold bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="ALL">แสดงทุกเกรด (All Grades)</option>
+              <option value="A">เฉพาะ Grade A (ดีเยี่ยม ≥ 85)</option>
+              <option value="B">เฉพาะ Grade B (ดี 70–84.9)</option>
+              <option value="C">เฉพาะ Grade C (ปานกลาง 50–69.9)</option>
+              <option value="D">เฉพาะ Reject / Grade D (&lt; 50)</option>
+            </select>
+            <button onclick="exportQualityCSV()" class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-sm transition">
+              <span>📥 ส่งออกรายงาน CSV</span>
+            </button>
           </div>
         </div>
 
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
-              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase">
-                <th class="py-3.5 px-5">ไฟล์ภาพ</th>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3.5 px-5">ไฟล์ภาพ &amp; อุปกรณ์</th>
                 <th class="py-3.5 px-5 text-center">คะแนนรวม &amp; เกรด</th>
-                <th class="py-3.5 px-5">ดัชนีคะแนนย่อย (Focus / Exposure / Stability)</th>
-                <th class="py-3.5 px-5">การวินิจฉัยสาเหตุ &amp; คำแนะนำเชิงเทคนิค</th>
+                <th class="py-3.5 px-5">คะแนนแยก 3 มิติ (Sub-Indices)</th>
+                <th class="py-3.5 px-5">ผลการวินิจฉัยและข้อสังเกตทางเทคนิค</th>
               </tr>
             </thead>
             <tbody id="qualityTableBody" class="divide-y divide-slate-200 text-sm">
               <tr>
-                <td colspan="4" class="py-12 text-center text-slate-400">ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพด้านบน</td>
+                <td colspan="4" class="py-12 text-center text-slate-400">
+                  ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพด้านบนเพื่อประเมินเกรดคุณภาพ
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
-    </div>
+    </section>
 
     <!-- ===================================================================== -->
-    <!-- เมนูที่ 3: วิเคราะห์เส้นขอบ (Canny Edge) & ฮิสโตแกรมสี (Histogram)     -->
+    <!-- เมนูที่ 3: วิเคราะห์โครงสร้างเส้นขอบและฮิสโตแกรมแสง (Edge & Histogram)  -->
     <!-- ===================================================================== -->
-    <div id="menuSection3" class="menu-section hidden space-y-6">
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-200">
-          <div>
-            <h2 class="text-lg font-bold text-slate-800">📐 วิเคราะห์โครงสร้างเส้นขอบ (Canny Edge) &amp; ฮิสโตแกรมการกระจายแสง (RGB Histogram)</h2>
-            <p class="text-xs text-slate-500 mt-0.5">ตรวจสอบความหนาแน่นเส้นขอบจริงในพื้นที่โฟกัส (ROI) เพื่อแยกแยะความคมชัดเชิงแสงออกจากเกรนสัญญาณรบกวน (Noise) และตรวจจับแสงทะลุ/มืดจม</p>
+    <section id="section-menu3" class="menu-section hidden space-y-5">
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <span>📐</span> วิเคราะห์โครงสร้างเส้นขอบ (Canny Edge Map) และการกระจายแสง (RGB Histogram)
+          </h2>
+          <p class="text-xs text-slate-500 mt-0.5">
+            ตรวจสอบรายละเอียดพื้นผิวบริเวณจุดโฟกัส (ROI) แยกความคมชัดจริงออกจาก Noise พร้อมตรวจจับอาการแสงจ้าทะลุ (Highlight Clipping) และมืดจม (Shadow Crushing)
+          </p>
+        </div>
+      </div>
+
+      <div id="edgeHistogramContainer" class="space-y-5">
+        <div class="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
+          ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพเพื่อแสดงผล Edge Map และ RGB Histogram
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- เมนูที่ 4: สถิติเปรียบเทียบและอภิข้อมูลเชิงลึก (Statistical Insights)   -->
+    <!-- ===================================================================== -->
+    <section id="section-menu4" class="menu-section hidden space-y-6">
+      <div id="statsEmptyState" class="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
+        ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพเพื่อแสดงกราฟวิเคราะห์สถิติและอภิข้อมูล MakerNotes เชิงลึก
+      </div>
+
+      <div id="statsContent" class="hidden space-y-6">
+        <!-- Row 1: Chart 1 & Chart 2 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-base font-bold text-slate-800 mb-1">🔬 เปรียบเทียบความคมชัดรายภาพ (AF Sharpness vs Peak Sharpness)</h3>
+            <p class="text-xs text-slate-500 mb-4">เปรียบเทียบค่า Laplacian Variance ณ จุดโฟกัสกล้องกับจุดที่คมชัดที่สุดในเฟรม</p>
+            <div class="h-72">
+              <canvas id="chartPerImageSharpness"></canvas>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
-            <label for="edgeFileSelect" class="text-xs font-bold text-slate-600 whitespace-nowrap">เลือกไฟล์ภาพ:</label>
-            <select id="edgeFileSelect" onchange="renderMenu3Selected()" class="border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[220px]">
-              <option value="">-- รออัปโหลดไฟล์ภาพ --</option>
-            </select>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-base font-bold text-slate-800 mb-1">📊 ค่าเฉลี่ยความคมชัดและคะแนนคุณภาพจำแนกตามกลุ่ม ISO</h3>
+            <p class="text-xs text-slate-500 mb-4">จัดกลุ่มตามค่าความไวแสง (ISO Group Analysis) ตามหลักการวิเคราะห์จากสมุดโน้ตบุ๊ก</p>
+            <div class="h-72">
+              <canvas id="chartIsoGroup"></canvas>
+            </div>
           </div>
         </div>
 
-        <div id="menu3EmptyState" class="py-12 text-center text-slate-400 text-sm">
-          ยังไม่มีรายการไฟล์ กรุณาอัปโหลดไฟล์ภาพเพื่อดูแผนที่เส้นขอบ Canny Edge และกราฟ RGB Histogram
-        </div>
-
-        <div id="menu3Content" class="hidden pt-6 space-y-6">
-          <!-- 3-Column Visual Panel -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <!-- Col 1: Original Focus ROI -->
-            <div class="lg:col-span-3 bg-slate-50 rounded-xl p-4 border border-slate-200 flex flex-col">
-              <div class="text-xs font-bold text-slate-700 mb-2">1. ภาพพื้นที่จุดโฟกัสจริง (Focus ROI)</div>
-              <div class="bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center h-56 border border-slate-200">
-                <img id="m3RoiImg" src="" alt="Original ROI" class="max-h-full max-w-full object-contain" />
-              </div>
-              <div id="m3RoiMeta" class="text-xs text-slate-500 mt-2.5 space-y-1"></div>
-            </div>
-
-            <!-- Col 2: Canny Edge Map -->
-            <div class="lg:col-span-3 bg-slate-50 rounded-xl p-4 border border-slate-200 flex flex-col">
-              <div class="text-xs font-bold text-indigo-700 mb-2">2. แผนที่เส้นขอบ (Canny + Otsu)</div>
-              <div class="bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center h-56 border border-indigo-200">
-                <img id="m3CannyImg" src="" alt="Canny Edge Map" class="max-h-full max-w-full object-contain" />
-              </div>
-              <div id="m3EdgeSummary" class="text-xs text-slate-600 mt-2.5 space-y-1"></div>
-            </div>
-
-            <!-- Col 3: RGB Histogram Chart -->
-            <div class="lg:col-span-6 bg-slate-50 rounded-xl p-4 border border-slate-200 flex flex-col">
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-bold text-slate-800">3. กราฟฮิสโตแกรมการกระจายแสง 3 ช่องสี (RGB Histogram)</span>
-                <span id="m3ContrastBadge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Contrast: -</span>
-              </div>
-              <div class="bg-white rounded-lg p-3 border border-slate-200 h-56">
-                <canvas id="rgbHistogramCanvas"></canvas>
-              </div>
-              <div class="grid grid-cols-3 gap-2 mt-2.5 text-xs">
-                <div class="bg-white p-2 rounded-lg border border-slate-200">
-                  <span class="text-slate-400 block">ความสว่างเฉลี่ย</span>
-                  <strong id="m3BrightnessVal" class="text-slate-800 text-sm">-</strong>
-                </div>
-                <div class="bg-white p-2 rounded-lg border border-slate-200">
-                  <span class="text-slate-400 block">แสงจ้าทะลุ (Highlight ≥250)</span>
-                  <strong id="m3HighlightVal" class="text-amber-600 text-sm">-</strong>
-                </div>
-                <div class="bg-white p-2 rounded-lg border border-slate-200">
-                  <span class="text-slate-400 block">ส่วนมืดจม (Shadow ≤5)</span>
-                  <strong id="m3ShadowVal" class="text-slate-700 text-sm">-</strong>
-                </div>
-              </div>
+        <!-- Row 2: Scatter Plot & ISO Group Table -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div class="lg:col-span-6 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-base font-bold text-slate-800 mb-1">📈 ความสัมพันธ์ระหว่าง Edge Density (%) กับ AF Sharpness</h3>
+            <p class="text-xs text-slate-500 mb-4">ช่วยแยกแยะภาพที่มีรายละเอียดเส้นขอบคมชัดจริง ออกจากภาพที่ Sharpness สูงเพราะ Grain/Noise</p>
+            <div class="h-64">
+              <canvas id="chartEdgeScatter"></canvas>
             </div>
           </div>
 
-          <!-- Comparison Table of Optical Edge & Exposure Metrics across all files -->
-          <div class="border border-slate-200 rounded-xl overflow-hidden">
-            <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-700 uppercase">
-              ตารางเปรียบเทียบค่า Edge Density, Sobel Gradient, Contrast และ Exposure Clipping ทุกไฟล์ในชุดข้อมูล
-            </div>
-            <div class="overflow-x-auto">
+          <div class="lg:col-span-6 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col">
+            <h3 class="text-base font-bold text-slate-800 mb-1">📋 ตารางสรุปสถิติจัดกลุ่มตามค่า ISO (ISO Group Summary)</h3>
+            <p class="text-xs text-slate-500 mb-3">ค่าเฉลี่ยความคมชัด คะแนนคุณภาพ และจำนวนภาพในแต่ละช่วง ISO</p>
+            <div class="overflow-x-auto flex-1">
               <table class="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr class="bg-slate-50/70 border-b border-slate-200 text-slate-500">
-                    <th class="py-2.5 px-4">ชื่อไฟล์</th>
-                    <th class="py-2.5 px-4 text-right">AF Sharpness</th>
-                    <th class="py-2.5 px-4 text-right">Edge Density (%)</th>
-                    <th class="py-2.5 px-4 text-right">Sobel Gradient</th>
-                    <th class="py-2.5 px-4 text-right">Contrast (Std Dev)</th>
-                    <th class="py-2.5 px-4 text-right">Highlight Clip (%)</th>
-                    <th class="py-2.5 px-4 text-right">Shadow Crush (%)</th>
+                  <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase">
+                    <th class="py-2.5 px-3">กลุ่ม ISO</th>
+                    <th class="py-2.5 px-3 text-center">จำนวนภาพ</th>
+                    <th class="py-2.5 px-3 text-right">เฉลี่ย AF Sharpness</th>
+                    <th class="py-2.5 px-3 text-right">เฉลี่ย Edge Density</th>
+                    <th class="py-2.5 px-3 text-right">เฉลี่ย Quality Score</th>
                   </tr>
                 </thead>
-                <tbody id="m3AllFilesBody" class="divide-y divide-slate-200"></tbody>
+                <tbody id="isoGroupTableBody" class="divide-y divide-slate-200"></tbody>
               </table>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- ===================================================================== -->
-    <!-- เมนูที่ 4: เปรียบเทียบพารามิเตอร์กล้อง & สอบเทียบ AF Fine-tune           -->
-    <!-- ===================================================================== -->
-    <div id="menuSection4" class="menu-section hidden space-y-6">
-      <!-- Optimal AF Fine-tune Banner -->
-      <div id="afCalibrationBanner" class="bg-gradient-to-r from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-sm">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div class="text-xs uppercase tracking-wider font-bold text-indigo-200">ระบบแนะนำค่าสอบเทียบเลนส์อัตโนมัติ (AF Fine-Tune Calibration Advisor)</div>
-            <h3 id="afCalibrationTitle" class="text-xl font-bold mt-1">อัปโหลดชุดภาพทดสอบ AF Fine-tune (เช่น -10, -5, 0, +5, +10) เพื่อคำนวณจุดคมชัดสูงสุด</h3>
-            <p id="afCalibrationDesc" class="text-xs text-indigo-100 mt-1">ระบบจะเปรียบเทียบค่าความคมชัดเฉลี่ยในแต่ละระดับการจูน และระบุค่าชดเชยที่แม่นยำที่สุดสำหรับเลนส์ชิ้นนี้</p>
+        <!-- Row 3: Deep MakerNotes Table -->
+        <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
+            <h3 class="text-base font-bold text-slate-800">🗂️ ตารางอภิข้อมูลเชิงลึกจาก MakerNotes (Deep RAW/EXIF Metadata)</h3>
+            <p class="text-xs text-slate-500 mt-0.5">สกัดค่าพารามิเตอร์ระบบโฟกัส ระยะโฟกัส และความเอียงระนาบกล้องที่ซ่อนอยู่ในไฟล์ภาพ</p>
           </div>
-          <div class="bg-white/15 backdrop-blur-sm rounded-xl px-5 py-3 text-center shrink-0 border border-white/20">
-            <div class="text-xs text-indigo-100">ค่าจูนที่แนะนำ</div>
-            <div id="afOptimalValueBadge" class="text-3xl font-extrabold mt-0.5">-</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Charts Row 1 -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-800 mb-3">📊 1. เปรียบเทียบความคมชัดรายภาพ (AF Sharpness vs Peak Sharpness)</h3>
-          <div class="h-72">
-            <canvas id="sharpnessBarCanvas"></canvas>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-800 mb-3">🎯 2. กราฟเส้นโค้งสอบเทียบ AF Fine-Tune Adjustment</h3>
-          <div class="h-72">
-            <canvas id="afTuneCurveCanvas"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Charts Row 2: ISO Group & Aperture/Shutter -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div class="lg:col-span-6 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-800 mb-3">📈 3. ค่าเฉลี่ยความคมชัดจำแนกตามกลุ่ม ISO (ISO Group Analytics)</h3>
-          <div class="h-64">
-            <canvas id="isoGroupCanvas"></canvas>
-          </div>
-          <div class="mt-4 overflow-x-auto border border-slate-200 rounded-xl">
-            <table class="w-full text-left text-xs">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
               <thead>
-                <tr class="bg-slate-50 border-b border-slate-200 text-slate-500">
-                  <th class="py-2 px-3">กลุ่ม ISO</th>
-                  <th class="py-2 px-3 text-right">จำนวนภาพ</th>
-                  <th class="py-2 px-3 text-right">เฉลี่ย AF Sharpness</th>
-                  <th class="py-2 px-3 text-right">เฉลี่ย Peak Sharpness</th>
-                  <th class="py-2 px-3 text-right">คะแนนคุณภาพเฉลี่ย</th>
+                <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase">
+                  <th class="py-3 px-4">ชื่อไฟล์</th>
+                  <th class="py-3 px-4">ความละเอียด</th>
+                  <th class="py-3 px-4">Focus Mode</th>
+                  <th class="py-3 px-4">AF Area Mode</th>
+                  <th class="py-3 px-4">ระยะโฟกัส (Focus Dist.)</th>
+                  <th class="py-3 px-4">มุมเอียง Roll / Pitch</th>
+                  <th class="py-3 px-4">White Balance</th>
+                  <th class="py-3 px-4">ระบบวัดแสง (Metering)</th>
                 </tr>
               </thead>
-              <tbody id="isoGroupTableBody" class="divide-y divide-slate-200">
-                <tr><td colspan="5" class="py-6 text-center text-slate-400">ยังไม่มีข้อมูล</td></tr>
-              </tbody>
+              <tbody id="deepMetadataBody" class="divide-y divide-slate-200"></tbody>
             </table>
           </div>
         </div>
-
-        <div class="lg:col-span-6 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-800 mb-3">🔭 4. ความสัมพันธ์ระหว่างรูรับแสง (F-Number) กับความคมชัด</h3>
-          <div class="h-64">
-            <canvas id="apertureScatterCanvas"></canvas>
-          </div>
-          <div class="mt-4 bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-xs text-slate-600 space-y-1">
-            <div class="font-bold text-slate-800">💡 หลักการวิเคราะห์ Sweet Spot ของเลนส์:</div>
-            <p>เลนส์ส่วนใหญ่จะให้ความคมชัดสูงสุด (Sweet Spot) เมื่อหรี่รูรับแสงลง 1–2 สต็อปจากรูรับแสงกว้างสุด (เช่น f/2.8 → f/4 หรือ f/5.6) กราฟนี้ช่วยเปรียบเทียบประสิทธิภาพของเลนส์ในแต่ละค่ารูรับแสงได้ทันที</p>
-          </div>
-        </div>
       </div>
-    </div>
+    </section>
 
     <!-- ===================================================================== -->
-    <!-- เมนูที่ 5: ความสัมพันธ์เชิงสถิติ & เสถียรภาพกล้อง (Correlation & Stats)  -->
+    <!-- เมนูที่ 5: API & JSON Integration (สำหรับเชื่อมต่อระบบภายนอก)          -->
     <!-- ===================================================================== -->
-    <div id="menuSection5" class="menu-section hidden space-y-6">
-      <!-- Correlation KPI Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <div class="text-xs font-bold text-slate-500 uppercase">สหสัมพันธ์ Sharpness vs Edge Density</div>
-          <div id="corrSharpEdgeVal" class="text-3xl font-bold text-indigo-600 mt-1">N/A</div>
-          <div id="corrSharpEdgeDesc" class="text-xs text-slate-500 mt-1">ต้องมีข้อมูลอย่างน้อย 2 ภาพขึ้นไป</div>
+    <section id="section-menu5" class="menu-section hidden space-y-6">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <span>🔌</span> REST API Endpoint &amp; โครงสร้างข้อมูล JSON สำหรับเชื่อมต่อระบบอื่น
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">
+              สามารถส่งไฟล์ภาพเข้าสู่ Endpoint <code class="bg-slate-100 px-1.5 py-0.5 rounded text-indigo-700 font-mono">POST /api/v1/quality-evaluate</code> เพื่อรับผลประเมินคุณภาพแบบ JSON ได้ทันที
+            </p>
+          </div>
+          <button onclick="copyLatestJson()" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-sm transition">
+            <span>📋 คัดลอก JSON ล่าสุด</span>
+          </button>
         </div>
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <div class="text-xs font-bold text-slate-500 uppercase">สหสัมพันธ์ Sharpness vs Roll Angle</div>
-          <div id="corrSharpRollVal" class="text-3xl font-bold text-teal-600 mt-1">N/A</div>
-          <div id="corrSharpRollDesc" class="text-xs text-slate-500 mt-1">ตรวจสอบผลกระทบจากการเอียงของกล้อง</div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <div class="text-xs font-bold text-slate-500 uppercase">สหสัมพันธ์ Sharpness vs ISO</div>
-          <div id="corrSharpIsoVal" class="text-3xl font-bold text-amber-600 mt-1">N/A</div>
-          <div id="corrSharpIsoDesc" class="text-xs text-slate-500 mt-1">ตรวจสอบการลดลงของความคมชัดเมื่อดัน ISO</div>
-        </div>
-      </div>
 
-      <!-- Scatter Plots -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-800 mb-3">📐 1. Scatter Plot: Sharpness Score vs Edge Density (%)</h3>
-          <div class="h-72">
-            <canvas id="corrEdgeScatterCanvas"></canvas>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div>
+            <div class="text-xs font-bold text-slate-600 mb-2">ตัวอย่างการเรียกใช้งานด้วย Python (requests)</div>
+            <pre class="bg-slate-900 text-emerald-300 text-xs p-4 rounded-xl overflow-x-auto leading-relaxed font-mono">import requests
+
+url = "http://localhost:8000/api/v1/quality-evaluate"
+with open("sample_photo.NEF", "rb") as f:
+    res = requests.post(url, files={"file": f})
+
+data = res.json()
+print("Grade:", data["quality_evaluation"]["grade_label"])
+print("Score:", data["quality_evaluation"]["quality_score"])
+print("Issues:", data["quality_evaluation"]["issues_detected"])</pre>
+          </div>
+
+          <div>
+            <div class="text-xs font-bold text-slate-600 mb-2">ผลลัพธ์ JSON จริงของไฟล์ล่าสุดในระบบ</div>
+            <pre id="latestJsonPreview" class="bg-slate-900 text-sky-200 text-xs p-4 rounded-xl overflow-x-auto max-h-64 leading-relaxed font-mono">{
+  "status": "รอการอัปโหลดไฟล์ภาพเพื่อแสดงตัวอย่าง JSON จริง..."
+}</pre>
           </div>
         </div>
-
-        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-800 mb-3">🧭 2. เสถียรภาพระนาบกล้อง: Roll Angle (°) vs Sharpness Score</h3>
-          <div class="h-72">
-            <canvas id="corrRollScatterCanvas"></canvas>
-          </div>
-        </div>
       </div>
-
-      <!-- Metadata Variance Detector Table -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
-          <h3 class="text-base font-bold text-slate-800">🔍 ระบบตรวจจับความผันแปรของพารามิเตอร์ระหว่างไฟล์ (Metadata Variance Detector)</h3>
-          <p class="text-xs text-slate-500 mt-0.5">เปรียบเทียบค่าต่ำสุด สูงสุด ค่าเฉลี่ย และส่วนเบี่ยงเบนมาตรฐาน (Std Dev) ของทุกตัวแปร เพื่อชี้ให้เห็นว่าพารามิเตอร์ใดมีการเปลี่ยนแปลงในชุดภาพทดสอบ</p>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase">
-                <th class="py-3 px-5">ชื่อพารามิเตอร์ (Parameter)</th>
-                <th class="py-3 px-5 text-center">สถานะความผันแปร</th>
-                <th class="py-3 px-5 text-right">ต่ำสุด (Min)</th>
-                <th class="py-3 px-5 text-right">สูงสุด (Max)</th>
-                <th class="py-3 px-5 text-right">ค่าเฉลี่ย (Mean)</th>
-                <th class="py-3 px-5 text-right">ส่วนเบี่ยงเบน (Std Dev)</th>
-              </tr>
-            </thead>
-            <tbody id="varianceTableBody" class="divide-y divide-slate-200">
-              <tr><td colspan="6" class="py-8 text-center text-slate-400">ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพด้านบน</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    </section>
   </div>
 
-  <!-- Modal สำหรับดูรายละเอียดส่วนที่ชัดที่สุด และเปรียบเทียบพิกัด (เมนูที่ 1) -->
+  <!-- Modal สำหรับดูรายละเอียดส่วนที่ชัดที่สุด และเปรียบเทียบพิกัด (คงเดิมจากเวอร์ชัน 1) -->
   <div id="detailModal" class="fixed inset-0 z-50 hidden bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+      <!-- Modal Header -->
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div>
           <h3 id="modalTitle" class="text-lg font-bold text-slate-900">รายละเอียดส่วนที่คมชัดที่สุด &amp; พิกัดจุดโฟกัส</h3>
@@ -427,7 +361,9 @@
         <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-2xl font-bold leading-none px-2">&times;</button>
       </div>
 
+      <!-- Modal Body -->
       <div class="p-6 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left: Sharpest Crop 100% Detail -->
         <div class="lg:col-span-6 flex flex-col">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm font-bold text-emerald-700 flex items-center gap-1.5">
@@ -447,4 +383,781 @@
           </p>
         </div>
 
-        <div class="lg:col-
+        <!-- Right: Full Frame Comparison & Metrics -->
+        <div class="lg:col-span-6 flex flex-col">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-bold text-slate-800">🎯 ตำแหน่งเปรียบเทียบในเฟรมภาพ</span>
+            <div class="flex items-center gap-3 text-xs">
+              <span class="inline-flex items-center gap-1 text-blue-600 font-semibold"><span class="w-2.5 h-2.5 inline-block bg-blue-600 rounded-xs"></span> จุดโฟกัสกล้อง</span>
+              <span class="inline-flex items-center gap-1 text-emerald-600 font-semibold"><span class="w-2.5 h-2.5 inline-block bg-emerald-500 rounded-xs"></span> จุดชัดที่สุด</span>
+            </div>
+          </div>
+          <div class="rounded-xl bg-slate-950 overflow-hidden border border-slate-200 flex items-center justify-center min-h-[240px]">
+            <img id="modalFullImg" src="" alt="Annotated Full Frame" class="max-h-[320px] w-auto object-contain" />
+          </div>
+
+          <!-- Comparison Box -->
+          <div class="mt-4 bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+              <div class="bg-white p-3 rounded-lg border border-blue-100">
+                <div class="text-xs text-slate-500">ความคมชัด ณ จุดโฟกัสกล้อง</div>
+                <div id="modalAfSharpness" class="text-xl font-bold text-blue-600 mt-0.5">-</div>
+                <div id="modalAfCoords" class="text-xs text-slate-400 mt-0.5">-</div>
+              </div>
+              <div class="bg-white p-3 rounded-lg border border-emerald-100">
+                <div class="text-xs text-slate-500">ความคมชัด ณ จุดที่ชัดที่สุด</div>
+                <div id="modalPeakSharpness" class="text-xl font-bold text-emerald-600 mt-0.5">-</div>
+                <div id="modalPeakCoords" class="text-xs text-slate-400 mt-0.5">-</div>
+              </div>
+            </div>
+            <div class="pt-2 border-t border-slate-200 flex flex-wrap justify-between gap-2 text-xs">
+              <span><strong>ระยะคลาดเคลื่อน:</strong> <span id="modalOffset" class="text-indigo-700 font-semibold">-</span></span>
+              <span><strong>AF Fine-tune (ในไฟล์):</strong> <span id="modalAfTune" class="text-purple-700 font-semibold">-</span></span>
+            </div>
+            <div id="modalAdvice" class="text-xs text-slate-600 bg-emerald-50/70 border border-emerald-200/70 rounded-lg p-2.5 mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const resultsBody = document.getElementById('resultsBody');
+    const progressText = document.getElementById('progressText');
+    const analyzedStore = {};
+    const analyzedOrder = [];
+    const histCharts = {};
+    let chartPerImage = null;
+    let chartIso = null;
+    let chartScatter = null;
+    let activeMenu = 'menu1';
+
+    function switchMenu(menuId) {
+      activeMenu = menuId;
+      document.querySelectorAll('.menu-section').forEach(sec => sec.classList.add('hidden'));
+      document.querySelectorAll('.menu-tab').forEach(btn => {
+        btn.classList.remove('active');
+        btn.classList.add('text-slate-600');
+      });
+
+      const targetSec = document.getElementById('section-' + menuId);
+      const targetBtn = document.getElementById('tabBtn-' + menuId);
+      if (targetSec) targetSec.classList.remove('hidden');
+      if (targetBtn) {
+        targetBtn.classList.add('active');
+        targetBtn.classList.remove('text-slate-600');
+      }
+
+      if (menuId === 'menu2') renderMenu2();
+      if (menuId === 'menu3') renderMenu3();
+      if (menuId === 'menu4') renderMenu4();
+      if (menuId === 'menu5') renderMenu5();
+    }
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('border-indigo-500', 'bg-indigo-50/40');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+      if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFiles(e.target.files);
+    });
+
+    function clearAllResults() {
+      Object.keys(analyzedStore).forEach(k => delete analyzedStore[k]);
+      analyzedOrder.length = 0;
+      resultsBody.innerHTML = `
+        <tr id="emptyRow">
+          <td colspan="4" class="py-12 text-center text-slate-400">
+            ยังไม่มีรายการไฟล์ กรุณาอัปโหลดไฟล์ภาพเพื่อเริ่มการวิเคราะห์
+          </td>
+        </tr>
+      `;
+      document.getElementById('clearAllBtn').classList.add('hidden');
+      document.getElementById('badgeMenu2').classList.add('hidden');
+      progressText.textContent = 'พร้อมใช้งาน';
+      renderMenu2();
+      renderMenu3();
+      renderMenu4();
+      renderMenu5();
+    }
+
+    async function handleFiles(fileList) {
+      const files = Array.from(fileList);
+      const emptyRow = document.getElementById('emptyRow');
+      if (emptyRow) emptyRow.remove();
+
+      let completed = 0;
+      progressText.textContent = `กำลังประมวลผล 0 / ${files.length} ไฟล์`;
+
+      for (const file of files) {
+        const rowId = 'row_' + Math.random().toString(36).slice(2, 10);
+        const tr = document.createElement('tr');
+        tr.id = rowId;
+        tr.className = 'hover:bg-slate-50/80 transition';
+        tr.innerHTML = `
+          <td class="py-4 px-5 font-medium text-slate-700">${escapeHtml(file.name)}</td>
+          <td colspan="3" class="py-4 px-5 text-slate-400 text-xs">กำลังอ่านค่า EXIF, คำนวณจุดคมชัดสูงสุด และประเมินเกรดคุณภาพ...</td>
+        `;
+        resultsBody.prepend(tr);
+
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const resp = await fetch('/analyze-file', { method: 'POST', body: formData });
+          const data = await resp.json();
+          const res = data.result;
+
+          if (res.error) {
+            tr.innerHTML = `
+              <td class="py-4 px-5 font-bold text-slate-800">${escapeHtml(file.name)}</td>
+              <td colspan="3" class="py-4 px-5 text-rose-600 text-xs font-medium">เกิดข้อผิดพลาด: ${escapeHtml(res.error)}</td>
+            `;
+          } else {
+            analyzedStore[rowId] = res;
+            analyzedOrder.unshift(rowId);
+            renderResultRow(tr, rowId, res);
+
+            document.getElementById('clearAllBtn').classList.remove('hidden');
+            const badge2 = document.getElementById('badgeMenu2');
+            badge2.textContent = analyzedOrder.length;
+            badge2.classList.remove('hidden');
+
+            // อัปเดตเมนูอื่นๆ แบบเรียลไทม์
+            renderMenu2();
+            if (activeMenu === 'menu3') renderMenu3();
+            if (activeMenu === 'menu4') renderMenu4();
+            if (activeMenu === 'menu5') renderMenu5();
+          }
+        } catch (err) {
+          tr.innerHTML = `
+            <td class="py-4 px-5 font-bold text-slate-800">${escapeHtml(file.name)}</td>
+            <td colspan="3" class="py-4 px-5 text-rose-600 text-xs font-medium">เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ: ${escapeHtml(err.message)}</td>
+          `;
+        }
+
+        completed++;
+        progressText.textContent = `กำลังประมวลผล ${completed} / ${files.length} ไฟล์`;
+      }
+
+      progressText.textContent = `ประมวลผลเสร็จสิ้น (${analyzedOrder.length} ไฟล์ในระบบ)`;
+    }
+
+    // =========================================================================
+    // เมนูที่ 1: คงรูปแบบและการแสดงผลเดิมไว้ทั้งหมด + ปุ่มลิงก์ไปดูคะแนนเกรด
+    // =========================================================================
+    function renderResultRow(tr, rowId, r) {
+      const fDisplay = r.f_number && r.f_number !== 'N/A' ? `f/${r.f_number}` : 'N/A';
+      const focalDisplay = r.focal_length && r.focal_length !== 'N/A' ? `${r.focal_length}mm` : 'N/A';
+      const shutterDisplay = r.exposure_time && r.exposure_time !== 'N/A' ? `${r.exposure_time}s` : 'N/A';
+      const qEval = r.quality_eval || {};
+      const gradeCode = qEval.grade_code || '-';
+      const qScore = qEval.quality_score !== undefined ? qEval.quality_score : '-';
+
+      const gradeBadgeColor =
+        gradeCode === 'A' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+        gradeCode === 'B' ? 'bg-sky-50 text-sky-700 border-sky-200' :
+        gradeCode === 'C' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+        'bg-rose-50 text-rose-700 border-rose-200';
+
+      tr.innerHTML = `
+        <td class="py-4 px-5 align-top">
+          <div class="flex items-start gap-3">
+            <img src="${r.annotated_image}" alt="Thumb"
+                 onclick="openDetailModal('${rowId}', 'full')"
+                 class="w-16 h-16 rounded-lg object-cover border border-slate-200 cursor-pointer hover:ring-2 hover:ring-indigo-500 shrink-0" />
+            <div>
+              <div class="font-bold text-slate-900">${escapeHtml(r.filename)}</div>
+              <div class="text-xs text-slate-600 mt-1">📷 กล้อง: <span class="font-medium">${escapeHtml(r.camera)}</span></div>
+              <div class="text-xs text-slate-600 mt-0.5">🔭 เลนส์: <span class="font-medium text-indigo-700">${escapeHtml(r.lens)}</span></div>
+            </div>
+          </div>
+        </td>
+
+        <td class="py-4 px-5 align-top text-xs text-slate-600 space-y-1">
+          <div>รูรับแสง: <strong class="text-slate-800">${escapeHtml(fDisplay)}</strong> | ชัตเตอร์: <strong class="text-slate-800">${escapeHtml(shutterDisplay)}</strong></div>
+          <div>ทางยาวโฟกัส: <strong class="text-slate-800">${escapeHtml(focalDisplay)}</strong> | ISO: <strong class="text-slate-800">${escapeHtml(String(r.iso))}</strong></div>
+          <div class="pt-1 flex flex-wrap gap-1.5">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+              AF Fine-tune: ${escapeHtml(r.af_fine_tune)}
+            </span>
+            <button onclick="switchMenu('menu2')" title="คลิกเพื่อดูรายละเอียดเกรดคุณภาพในเมนูที่ 2"
+                    class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold border ${gradeBadgeColor} hover:opacity-80 cursor-pointer">
+              Grade ${escapeHtml(gradeCode)} (${qScore}/100)
+            </button>
+          </div>
+        </td>
+
+        <td class="py-4 px-5 align-top">
+          <div class="flex items-baseline gap-3">
+            <div>
+              <span class="text-xs text-slate-400 block">จุดโฟกัสกล้อง</span>
+              <span class="text-xl font-bold text-blue-600">${r.af_sharpness}</span>
+            </div>
+            <span class="text-slate-300 font-bold">/</span>
+            <div>
+              <span class="text-xs text-slate-400 block">จุดที่ชัดที่สุด</span>
+              <span class="text-xl font-bold text-emerald-600">${r.peak_sharpness}</span>
+            </div>
+          </div>
+          <div class="text-xs font-bold mt-1 text-slate-800">${escapeHtml(r.quality)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(r.advice)}</div>
+        </td>
+
+        <td class="py-4 px-5 align-top text-center">
+          <div class="flex flex-col items-center gap-2">
+            <div class="relative group cursor-pointer" onclick="openDetailModal('${rowId}', 'crop')" title="คลิกเพื่อแสดงรายละเอียดส่วนที่คมชัดที่สุด">
+              <img src="${r.sharpest_crop_image}" alt="Sharpest Crop"
+                   class="w-20 h-20 rounded-xl object-cover border-2 border-emerald-500 shadow-sm group-hover:scale-105 transition" />
+              <span class="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
+                🔍 ขยาย
+              </span>
+            </div>
+            <button onclick="openDetailModal('${rowId}', 'crop')"
+                    class="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition">
+              <span>🔍 พิกัด ${escapeHtml(r.af_point)}</span>
+            </button>
+          </div>
+        </td>
+      `;
+    }
+
+    // =========================================================================
+    // เมนูที่ 2: ระบบประเมินคุณภาพและจัดเกรดภาพถ่าย (Photo Quality Scoring)
+    // =========================================================================
+    function renderMenu2() {
+      const items = analyzedOrder.map(id => ({ id, r: analyzedStore[id] })).filter(x => x.r);
+      const total = items.length;
+      document.getElementById('kpiTotalCount').textContent = total;
+
+      if (total === 0) {
+        document.getElementById('kpiAvgScore').textContent = '-';
+        document.getElementById('kpiPassCount').textContent = '0';
+        document.getElementById('kpiPassPct').textContent = '0% ของชุดภาพทั้งหมด';
+        document.getElementById('kpiWarnCount').textContent = '0';
+        document.getElementById('qualityTableBody').innerHTML = `
+          <tr>
+            <td colspan="4" class="py-12 text-center text-slate-400">
+              ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพด้านบนเพื่อประเมินเกรดคุณภาพ
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      const avgScore = (items.reduce((acc, x) => acc + (x.r.quality_eval?.quality_score || 0), 0) / total).toFixed(1);
+      const passCount = items.filter(x => ['A', 'B'].includes(x.r.quality_eval?.grade_code)).length;
+      const warnCount = total - passCount;
+
+      document.getElementById('kpiAvgScore').textContent = avgScore;
+      document.getElementById('kpiPassCount').textContent = passCount;
+      document.getElementById('kpiPassPct').textContent = `${Math.round((passCount / total) * 100)}% ของชุดภาพทั้งหมด`;
+      document.getElementById('kpiWarnCount').textContent = warnCount;
+
+      const filterVal = document.getElementById('gradeFilter').value;
+      const filtered = filterVal === 'ALL'
+        ? items
+        : items.filter(x => x.r.quality_eval?.grade_code === filterVal);
+
+      if (filtered.length === 0) {
+        document.getElementById('qualityTableBody').innerHTML = `
+          <tr>
+            <td colspan="4" class="py-10 text-center text-slate-400">
+              ไม่พบรายการภาพที่ตรงกับตัวกรอง "${escapeHtml(filterVal)}"
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      document.getElementById('qualityTableBody').innerHTML = filtered.map(({ id, r }) => {
+        const q = r.quality_eval || {};
+        const tex = r.texture || {};
+        const gCode = q.grade_code || 'D';
+        const pillStyle =
+          gCode === 'A' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+          gCode === 'B' ? 'bg-sky-100 text-sky-800 border-sky-300' :
+          gCode === 'C' ? 'bg-amber-100 text-amber-800 border-amber-300' :
+          'bg-rose-100 text-rose-800 border-rose-300';
+
+        const issuesHtml = (q.issues_detected || []).map(iss => {
+          const isOk = iss.startsWith('✅');
+          return `<div class="text-xs px-2.5 py-1 rounded-lg border ${isOk ? 'bg-emerald-50/70 text-emerald-800 border-emerald-200' : 'bg-rose-50/70 text-rose-800 border-rose-200'}">${escapeHtml(iss)}</div>`;
+        }).join('');
+
+        return `
+          <tr class="hover:bg-slate-50/80 transition">
+            <td class="py-4 px-5 align-top">
+              <div class="flex items-start gap-3">
+                <img src="${r.sharpest_crop_image}" onclick="openDetailModal('${id}', 'crop')"
+                     class="w-14 h-14 rounded-xl object-cover border border-slate-200 cursor-pointer shrink-0" />
+                <div>
+                  <div class="font-bold text-slate-900">${escapeHtml(r.filename)}</div>
+                  <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(r.camera)} • ${escapeHtml(r.lens)}</div>
+                  <div class="text-xs text-slate-400 mt-0.5">f/${escapeHtml(r.f_number)} | ${escapeHtml(r.exposure_time)}s | ISO ${escapeHtml(String(r.iso))} | ${escapeHtml(r.focal_length)}mm</div>
+                </div>
+              </div>
+            </td>
+
+            <td class="py-4 px-5 align-top text-center">
+              <div class="text-2xl font-extrabold text-slate-900">${q.quality_score ?? '-'}<span class="text-xs font-normal text-slate-400">/100</span></div>
+              <span class="inline-block mt-1 px-2.5 py-1 rounded-full text-xs font-bold border ${pillStyle}">
+                ${escapeHtml(q.grade_label || '-')}
+              </span>
+            </td>
+
+            <td class="py-4 px-5 align-top space-y-2 min-w-[230px]">
+              <div>
+                <div class="flex justify-between text-xs mb-0.5">
+                  <span class="text-slate-600 font-medium">Focus &amp; Sharpness (50%)</span>
+                  <span class="font-bold text-indigo-700">${q.focus_index ?? 0}</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-1.5">
+                  <div class="bg-indigo-600 h-1.5 rounded-full" style="width: ${Math.min(100, q.focus_index ?? 0)}%"></div>
+                </div>
+              </div>
+              <div>
+                <div class="flex justify-between text-xs mb-0.5">
+                  <span class="text-slate-600 font-medium">Contrast &amp; Exposure (30%)</span>
+                  <span class="font-bold text-emerald-700">${q.contrast_exposure_index ?? 0}</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-1.5">
+                  <div class="bg-emerald-500 h-1.5 rounded-full" style="width: ${Math.min(100, q.contrast_exposure_index ?? 0)}%"></div>
+                </div>
+              </div>
+              <div>
+                <div class="flex justify-between text-xs mb-0.5">
+                  <span class="text-slate-600 font-medium">Technical Stability (20%)</span>
+                  <span class="font-bold text-amber-700">${q.stability_index ?? 0}</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-1.5">
+                  <div class="bg-amber-500 h-1.5 rounded-full" style="width: ${Math.min(100, q.stability_index ?? 0)}%"></div>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-400 pt-0.5">
+                Edge Density: ${tex.edge_density_pct ?? 0}% | Contrast: ${tex.contrast_std ?? 0} | ชัตเตอร์แนะนำ: ${escapeHtml(q.recommended_shutter || 'N/A')}
+              </div>
+            </td>
+
+            <td class="py-4 px-5 align-top space-y-1.5">
+              ${issuesHtml}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function exportQualityCSV() {
+      const items = analyzedOrder.map(id => analyzedStore[id]).filter(Boolean);
+      if (!items.length) {
+        alert('ยังไม่มีข้อมูลสำหรับส่งออก CSV');
+        return;
+      }
+      const headers = [
+        'Filename', 'Camera', 'Lens', 'FocalLength_mm', 'FNumber', 'ShutterSpeed', 'ISO',
+        'AF_Point', 'AF_FineTune', 'AF_Sharpness', 'Peak_Sharpness', 'Focus_Offset_Pct',
+        'Edge_Density_Pct', 'Contrast_Std', 'Highlight_Clip_Pct', 'Shadow_Crush_Pct',
+        'Quality_Score', 'Grade', 'Focus_Index', 'Contrast_Index', 'Stability_Index', 'Diagnosis'
+      ];
+      const rows = items.map(r => {
+        const q = r.quality_eval || {};
+        const t = r.texture || {};
+        return [
+          r.filename, r.camera, r.lens, r.focal_length, r.f_number, r.exposure_time, r.iso,
+          r.af_point, r.af_fine_tune, r.af_sharpness, r.peak_sharpness, r.focus_offset_pct,
+          t.edge_density_pct, t.contrast_std, t.highlight_clipping_pct, t.shadow_crushing_pct,
+          q.quality_score, q.grade_code, q.focus_index, q.contrast_exposure_index, q.stability_index,
+          (q.issues_detected || []).join(' | ')
+        ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+      });
+
+      const csvContent = '﻿' + [headers.join(','), ...rows].join('
+');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `photo_quality_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // =========================================================================
+    // เมนูที่ 3: วิเคราะห์โครงสร้างเส้นขอบและฮิสโตแกรมแสง (Edge & RGB Histogram)
+    // =========================================================================
+    function renderMenu3() {
+      const container = document.getElementById('edgeHistogramContainer');
+      const items = analyzedOrder.map(id => ({ id, r: analyzedStore[id] })).filter(x => x.r);
+
+      Object.values(histCharts).forEach(ch => ch.destroy());
+      Object.keys(histCharts).forEach(k => delete histCharts[k]);
+
+      if (!items.length) {
+        container.innerHTML = `
+          <div class="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
+            ยังไม่มีข้อมูล กรุณาอัปโหลดไฟล์ภาพเพื่อแสดงผล Edge Map และ RGB Histogram
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = items.map(({ id, r }) => {
+        const tex = r.texture || {};
+        const hiWarn = (tex.highlight_clipping_pct || 0) > 5.0;
+        const shWarn = (tex.shadow_crushing_pct || 0) > 12.0;
+
+        return `
+          <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
+              <div>
+                <h3 class="text-base font-bold text-slate-900">🎯 ${escapeHtml(r.filename)}</h3>
+                <p class="text-xs text-slate-500">${escapeHtml(r.camera)} | ${escapeHtml(r.lens)} | พิกัดโฟกัส: ${escapeHtml(r.af_point)} (${escapeHtml(r.af_coords_text)})</p>
+              </div>
+              <div class="flex flex-wrap gap-2 text-xs">
+                <span class="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200">
+                  Edge Density: ${tex.edge_density_pct ?? 0}%
+                </span>
+                <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">
+                  Sobel Gradient: ${tex.mean_gradient ?? 0}
+                </span>
+                <span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+                  Contrast (Std): ${tex.contrast_std ?? 0}
+                </span>
+                <span class="px-2.5 py-1 rounded-lg font-semibold border ${hiWarn ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-600 border-slate-200'}">
+                  Highlight Clip: ${tex.highlight_clipping_pct ?? 0}%
+                </span>
+                <span class="px-2.5 py-1 rounded-lg font-semibold border ${shWarn ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-600 border-slate-200'}">
+                  Shadow Crush: ${tex.shadow_crushing_pct ?? 0}%
+                </span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
+              <!-- Col 1: Original Focus ROI -->
+              <div class="md:col-span-3 flex flex-col items-center">
+                <div class="text-xs font-bold text-slate-600 mb-2">1. ภาพพื้นที่จุดโฟกัส (Focus ROI)</div>
+                <img src="${tex.af_roi_image || ''}" alt="Focus ROI" class="w-48 h-48 object-cover rounded-xl border border-slate-200 shadow-xs" />
+                <span class="text-[11px] text-slate-400 mt-1.5">ความสว่างเฉลี่ย: ${tex.mean_brightness ?? 0} / 255</span>
+              </div>
+
+              <!-- Col 2: Canny Edge Map -->
+              <div class="md:col-span-3 flex flex-col items-center">
+                <div class="text-xs font-bold text-slate-600 mb-2">2. แผนที่เส้นขอบ (Canny Edge Map)</div>
+                <img src="${tex.canny_edge_image || ''}" alt="Canny Edges" class="w-48 h-48 object-cover rounded-xl border border-slate-800 bg-black shadow-xs" />
+                <span class="text-[11px] text-slate-400 mt-1.5">สัดส่วนพิกเซลเส้นขอบ: ${tex.edge_density_pct ?? 0}%</span>
+              </div>
+
+              <!-- Col 3: RGB Histogram -->
+              <div class="md:col-span-6">
+                <div class="text-xs font-bold text-slate-600 mb-2">3. กราฟการกระจายแสง 3 ช่องสี (RGB Color Histogram — ROI)</div>
+                <div class="h-48 bg-slate-50/70 rounded-xl p-3 border border-slate-200">
+                  <canvas id="histCanvas_${id}"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // วาดกราฟ RGB Histogram ด้วย Chart.js
+      items.forEach(({ id, r }) => {
+        const hist = r.texture?.rgb_histogram;
+        const canvas = document.getElementById('histCanvas_' + id);
+        if (!hist || !canvas) return;
+        histCharts[id] = new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: hist.bins,
+            datasets: [
+              { label: 'Red', data: hist.r, borderColor: 'rgba(239, 68, 68, 0.9)', backgroundColor: 'rgba(239, 68, 68, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+              { label: 'Green', data: hist.g, borderColor: 'rgba(16, 185, 129, 0.9)', backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+              { label: 'Blue', data: hist.b, borderColor: 'rgba(59, 130, 246, 0.9)', backgroundColor: 'rgba(59, 130, 246, 0.12)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 11 } } } },
+            scales: {
+              x: { title: { display: true, text: 'ระดับความสว่าง (0 = มืดสุด, 255 = สว่างสุด)', font: { size: 10 } }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+              y: { title: { display: true, text: 'สัดส่วนพิกเซล (%)', font: { size: 10 } }, ticks: { font: { size: 10 } }, beginAtZero: true }
+            }
+          }
+        });
+      });
+    }
+
+    // =========================================================================
+    // เมนูที่ 4: สถิติเปรียบเทียบและอภิข้อมูล MakerNotes เชิงลึก
+    // =========================================================================
+    function renderMenu4() {
+      const items = analyzedOrder.slice().reverse().map(id => analyzedStore[id]).filter(Boolean);
+      const emptyEl = document.getElementById('statsEmptyState');
+      const contentEl = document.getElementById('statsContent');
+
+      if (chartPerImage) { chartPerImage.destroy(); chartPerImage = null; }
+      if (chartIso) { chartIso.destroy(); chartIso = null; }
+      if (chartScatter) { chartScatter.destroy(); chartScatter = null; }
+
+      if (!items.length) {
+        emptyEl.classList.remove('hidden');
+        contentEl.classList.add('hidden');
+        return;
+      }
+
+      emptyEl.classList.add('hidden');
+      contentEl.classList.remove('hidden');
+
+      // 1. Bar Chart: Per-Image AF Sharpness vs Peak Sharpness
+      const labels = items.map(r => r.filename.length > 18 ? r.filename.slice(0, 16) + '…' : r.filename);
+      const afSharpData = items.map(r => r.af_sharpness);
+      const peakSharpData = items.map(r => r.peak_sharpness);
+
+      chartPerImage = new Chart(document.getElementById('chartPerImageSharpness').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: 'AF Point Sharpness', data: afSharpData, backgroundColor: 'rgba(59, 130, 246, 0.85)', borderRadius: 6 },
+            { label: 'Peak Sharpness', data: peakSharpData, backgroundColor: 'rgba(16, 185, 129, 0.85)', borderRadius: 6 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'top' } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'Laplacian Variance' } } }
+        }
+      });
+
+      // 2. ISO Group Analysis (เหมือนในสมุดโน้ตบุ๊ก)
+      const isoGroups = {};
+      items.forEach(r => {
+        const isoNum = parseInt(r.iso, 10);
+        const key = isNaN(isoNum) ? 'Unknown' : isoNum;
+        if (!isoGroups[key]) {
+          isoGroups[key] = { iso: key, count: 0, sumSharp: 0, sumEdge: 0, sumQuality: 0 };
+        }
+        isoGroups[key].count += 1;
+        isoGroups[key].sumSharp += Number(r.af_sharpness || 0);
+        isoGroups[key].sumEdge += Number(r.texture?.edge_density_pct || 0);
+        isoGroups[key].sumQuality += Number(r.quality_eval?.quality_score || 0);
+      });
+
+      const sortedIso = Object.values(isoGroups).sort((a, b) => {
+        if (a.iso === 'Unknown') return 1;
+        if (b.iso === 'Unknown') return -1;
+        return a.iso - b.iso;
+      });
+
+      chartIso = new Chart(document.getElementById('chartIsoGroup').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: sortedIso.map(g => g.iso === 'Unknown' ? 'No ISO' : `ISO ${g.iso}`),
+          datasets: [
+            {
+              label: 'เฉลี่ย AF Sharpness',
+              data: sortedIso.map(g => Math.round(g.sumSharp / g.count)),
+              backgroundColor: 'rgba(13, 148, 136, 0.85)',
+              borderRadius: 6,
+              yAxisID: 'y'
+            },
+            {
+              label: 'เฉลี่ย Quality Score (0-100)',
+              data: sortedIso.map(g => Number((g.sumQuality / g.count).toFixed(1))),
+              backgroundColor: 'rgba(99, 102, 241, 0.85)',
+              borderRadius: 6,
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Avg Sharpness' } },
+            y1: { type: 'linear', position: 'right', beginAtZero: true, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: 'Quality Score' } }
+          }
+        }
+      });
+
+      // Populate ISO Summary Table
+      document.getElementById('isoGroupTableBody').innerHTML = sortedIso.map(g => `
+        <tr class="hover:bg-slate-50">
+          <td class="py-2.5 px-3 font-bold text-slate-800">${g.iso === 'Unknown' ? 'No EXIF' : 'ISO ' + g.iso}</td>
+          <td class="py-2.5 px-3 text-center">${g.count}</td>
+          <td class="py-2.5 px-3 text-right font-semibold text-teal-700">${Math.round(g.sumSharp / g.count)}</td>
+          <td class="py-2.5 px-3 text-right">${(g.sumEdge / g.count).toFixed(1)}%</td>
+          <td class="py-2.5 px-3 text-right font-bold text-indigo-700">${(g.sumQuality / g.count).toFixed(1)}</td>
+        </tr>
+      `).join('');
+
+      // 3. Scatter Plot: Edge Density (%) vs AF Sharpness
+      chartScatter = new Chart(document.getElementById('chartEdgeScatter').getContext('2d'), {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: 'ภาพถ่ายแต่ละใบ (Edge Density % vs Sharpness)',
+            data: items.map(r => ({
+              x: r.texture?.edge_density_pct || 0,
+              y: r.af_sharpness || 0,
+              filename: r.filename
+            })),
+            backgroundColor: 'rgba(79, 70, 229, 0.8)',
+            pointRadius: 6,
+            pointHoverRadius: 8
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.raw.filename}: Edge ${ctx.raw.x}%, Sharpness ${ctx.raw.y}`
+              }
+            }
+          },
+          scales: {
+            x: { title: { display: true, text: 'Edge Density (%)' }, beginAtZero: true },
+            y: { title: { display: true, text: 'AF Sharpness Score' }, beginAtZero: true }
+          }
+        }
+      });
+
+      // 4. Deep MakerNotes Table
+      document.getElementById('deepMetadataBody').innerHTML = items.map(r => {
+        const d = r.deep_notes || {};
+        const rollStr = d.roll_angle !== null && d.roll_angle !== undefined ? `${d.roll_angle}°` : 'N/A';
+        const pitchStr = d.pitch_angle !== null && d.pitch_angle !== undefined ? `${d.pitch_angle}°` : 'N/A';
+        return `
+          <tr class="hover:bg-slate-50">
+            <td class="py-2.5 px-4 font-bold text-slate-900">${escapeHtml(r.filename)}</td>
+            <td class="py-2.5 px-4 text-slate-600">${escapeHtml(r.resolution || 'N/A')}</td>
+            <td class="py-2.5 px-4 font-medium text-indigo-700">${escapeHtml(d.focus_mode || 'N/A')}</td>
+            <td class="py-2.5 px-4">${escapeHtml(d.af_area_mode || 'N/A')}</td>
+            <td class="py-2.5 px-4">${escapeHtml(d.focus_distance_text || 'N/A')}</td>
+            <td class="py-2.5 px-4">Roll: ${escapeHtml(rollStr)} / Pitch: ${escapeHtml(pitchStr)}</td>
+            <td class="py-2.5 px-4">${escapeHtml(d.white_balance || 'N/A')}</td>
+            <td class="py-2.5 px-4">${escapeHtml(d.metering_mode || 'N/A')}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // =========================================================================
+    // เมนูที่ 5: JSON & API Integration Preview
+    // =========================================================================
+    function renderMenu5() {
+      const previewEl = document.getElementById('latestJsonPreview');
+      if (!analyzedOrder.length) {
+        previewEl.textContent = JSON.stringify({ status: "รอการอัปโหลดไฟล์ภาพเพื่อแสดงตัวอย่าง JSON จริง..." }, null, 2);
+        return;
+      }
+      const latest = analyzedStore[analyzedOrder[0]];
+      const cleanPayload = {
+        filename: latest.filename,
+        camera: latest.camera,
+        lens: latest.lens,
+        resolution: latest.resolution,
+        exif: {
+          f_number: latest.f_number,
+          exposure_time: latest.exposure_time,
+          iso: latest.iso,
+          focal_length: latest.focal_length,
+          af_point: latest.af_point,
+          af_fine_tune: latest.af_fine_tune,
+          deep_notes: latest.deep_notes
+        },
+        metrics: {
+          af_sharpness: latest.af_sharpness,
+          peak_sharpness: latest.peak_sharpness,
+          sharpness_ratio_pct: latest.sharpness_ratio_pct,
+          focus_offset_pct: latest.focus_offset_pct,
+          edge_density_pct: latest.texture?.edge_density_pct,
+          mean_gradient: latest.texture?.mean_gradient,
+          contrast_std: latest.texture?.contrast_std,
+          highlight_clipping_pct: latest.texture?.highlight_clipping_pct,
+          shadow_crushing_pct: latest.texture?.shadow_crushing_pct
+        },
+        quality_evaluation: latest.quality_eval
+      };
+      previewEl.textContent = JSON.stringify(cleanPayload, null, 2);
+    }
+
+    function copyLatestJson() {
+      const text = document.getElementById('latestJsonPreview').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        alert('คัดลอกข้อมูล JSON เรียบร้อยแล้ว');
+      });
+    }
+
+    // =========================================================================
+    // Modal Functions (คงเดิมจากเวอร์ชัน 1)
+    // =========================================================================
+    function openDetailModal(rowId, focusTab) {
+      const r = analyzedStore[rowId];
+      if (!r) return;
+
+      document.getElementById('modalTitle').textContent = `${r.filename} — เปรียบเทียบจุดโฟกัสและส่วนที่ชัดที่สุด`;
+      document.getElementById('modalSubtitle').textContent = `${r.camera} | ${r.lens} | พิกัดกล้อง: ${r.af_point}`;
+      document.getElementById('modalCropImg').src = r.sharpest_crop_image;
+      document.getElementById('modalFullImg').src = r.annotated_image;
+
+      document.getElementById('modalAfSharpness').textContent = r.af_sharpness;
+      document.getElementById('modalAfCoords').textContent = `พิกัดกล้อง (${r.af_point}): ${r.af_coords_text}`;
+      document.getElementById('modalPeakSharpness').textContent = r.peak_sharpness;
+      document.getElementById('modalPeakCoords').textContent = `พิกัดจุดชัดสุด: ${r.peak_coords_text}`;
+      document.getElementById('modalOffset').textContent = `${r.focus_status} (สัดส่วนความคมชัด ${r.sharpness_ratio_pct}%)`;
+      document.getElementById('modalAfTune').textContent = r.af_fine_tune;
+      document.getElementById('modalAdvice').textContent = `${r.quality} — ${r.advice}`;
+
+      setCropZoom(1);
+      document.getElementById('detailModal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('detailModal').classList.add('hidden');
+    }
+
+    function setCropZoom(scale) {
+      const img = document.getElementById('modalCropImg');
+      img.style.transform = `scale(${scale})`;
+      document.querySelectorAll('.zoom-btn').forEach(btn => {
+        const z = parseFloat(btn.getAttribute('data-zoom'));
+        if (z === scale) {
+          btn.classList.add('bg-white', 'shadow-sm', 'text-indigo-600');
+          btn.classList.remove('text-slate-600');
+        } else {
+          btn.classList.remove('bg-white', 'shadow-sm', 'text-indigo-600');
+          btn.classList.add('text-slate-600');
+        }
+      });
+    }
+
+    document.getElementById('detailModal').addEventListener('click', (e) => {
+      if (e.target.id === 'detailModal') closeModal();
+    });
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>
