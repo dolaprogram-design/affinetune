@@ -145,14 +145,14 @@ def normalize_lens_brand(name: str) -> str:
     clean = re.sub(r'\s+', ' ', clean)
 
     for brand in SUPPORTED_BRANDS:
-        if re.search(rf'{re.escape(brand)}', clean, re.IGNORECASE):
-            clean = re.sub(rf'{re.escape(brand)}', brand, clean, flags=re.IGNORECASE)
+        if re.search(rf'\b{re.escape(brand)}\b', clean, re.IGNORECASE):
+            clean = re.sub(rf'\b{re.escape(brand)}\b', brand, clean, flags=re.IGNORECASE)
 
-    has_brand = any(re.search(rf'{re.escape(b)}', clean, re.IGNORECASE) for b in SUPPORTED_BRANDS)
+    has_brand = any(re.search(rf'\b{re.escape(b)}\b', clean, re.IGNORECASE) for b in SUPPORTED_BRANDS)
     if not has_brand:
-        if re.match(r'^(AF-S|AF-P|AF|AI-S|AI|NIKKOR|PC-E|1 NIKKOR)', clean, re.IGNORECASE):
+        if re.match(r'^(AF-S|AF-P|AF|AI-S|AI|NIKKOR|PC-E|1 NIKKOR)\b', clean, re.IGNORECASE):
             clean = f"Nikon {clean}"
-        elif re.match(r'^(EF|EF-S|EF-M|RF|RF-S|TS-E|MP-E)', clean, re.IGNORECASE):
+        elif re.match(r'^(EF|EF-S|EF-M|RF|RF-S|TS-E|MP-E)\b', clean, re.IGNORECASE):
             clean = f"Canon {clean}"
 
     return clean.strip()
@@ -162,8 +162,8 @@ def format_brand_casing(name: str) -> str:
     if not name:
         return ""
     for brand in SUPPORTED_BRANDS:
-        if re.search(rf'{re.escape(brand)}', name, re.IGNORECASE):
-            name = re.sub(rf'{re.escape(brand)}', brand, name, flags=re.IGNORECASE)
+        if re.search(rf'\b{re.escape(brand)}\b', name, re.IGNORECASE):
+            name = re.sub(rf'\b{re.escape(brand)}\b', brand, name, flags=re.IGNORECASE)
     return name.strip()
 
 
@@ -192,7 +192,7 @@ def matches_focal_range(lens_str: str, focal_val: Optional[float]) -> bool:
         min_f, max_f = float(m.group(1)), float(m.group(2))
         if min_f > 0 and max_f >= min_f:
             return (min_f * 0.85) <= focal_val <= (max_f * 2.1)
-    m_prime = re.search(r'(\d+(?:\.\d+)?)\s*mm', lens_str, re.IGNORECASE)
+    m_prime = re.search(r'\b(\d+(?:\.\d+)?)\s*mm\b', lens_str, re.IGNORECASE)
     if m_prime:
         p_f = float(m_prime.group(1))
         if p_f > 0:
@@ -227,7 +227,7 @@ def get_accurate_lens_name(metadata: dict) -> str:
         val = get_tag_value(metadata, [xmp_key])
         if not is_invalid_lens_tag(val):
             val_str = str(val).strip()
-            if any(re.search(rf'{re.escape(b)}', val_str, re.IGNORECASE) for b in SUPPORTED_BRANDS):
+            if any(re.search(rf'\b{re.escape(b)}\b', val_str, re.IGNORECASE) for b in SUPPORTED_BRANDS):
                 if matches_focal_range(val_str, focal_val):
                     return normalize_lens_brand(val_str)
 
@@ -539,7 +539,6 @@ def parse_camera_af_point(metadata: dict, img_w: int, img_h: int) -> Tuple[str, 
     orient_code = get_orientation_code(metadata)
 
     def finalize_sensor_norm(nx: float, ny: float, sensor_w: Optional[float] = None, sensor_h: Optional[float] = None) -> Tuple[str, int, int, bool]:
-        # หากพิกัดจาก MakerNotes อ้างอิงกรอบเซนเซอร์แนวนอน แต่ภาพถูกหมุนแนวตั้งตาม EXIF Orientation ให้แปลงแกนให้ตรงกัน
         if orient_code in (6, 8):
             if sensor_w and sensor_h and sensor_w > 0 and sensor_h > 0:
                 if (sensor_w > sensor_h) != (img_w > img_h):
@@ -618,7 +617,6 @@ def parse_camera_af_point(metadata: dict, img_w: int, img_h: int) -> Tuple[str, 
     if "CENTER" in af_upper:
         return af_text, img_w // 2, img_h // 2, True
 
-    # คืนค่า af_known=False เพื่อไม่ให้ระบบบังคับดึงจุดชัดสุดกลับเข้ากลางภาพ
     return af_text, img_w // 2, img_h // 2, False
 
 
@@ -650,7 +648,6 @@ def compute_native_sharpness(
     cx = int(np.clip(norm_x, 0.02, 0.98) * ow)
     cy = int(np.clip(norm_y, 0.02, 0.98) * oh)
 
-    # ใช้กรอบขนาดละเอียดเฉพาะจุด (~1/32 ของด้านสั้น เช่น ~153px บนภาพ 4912px)
     half_native = max(28, min(ow, oh) // 32)
     x1, x2 = max(0, cx - half_native), min(ow, cx + half_native)
     y1, y2 = max(0, cy - half_native), min(oh, cy + half_native)
@@ -690,7 +687,6 @@ def compute_native_sharpness(
     lap_coarse = cv2.Laplacian(patch_smooth, cv2.CV_32F, ksize=1)
     coarse_var = max(1.0, float(np.var(lap_coarse)))
 
-    # อัตราส่วนความคมขอบ (Acutance Crispness): ภาพเบลอจะมีค่านี้ต่ำแม้คอนทราสต์จัด
     crispness_ratio = fine_var / (coarse_var + 10.0)
     acutance_factor = float(np.clip(crispness_ratio / 4.5, 0.08, 1.35))
 
@@ -825,7 +821,7 @@ def compute_texture_and_histogram(
     highlight_clipping_pct = round(float((np.sum(gray_img >= 250) / total_pixels) * 100.0), 2)
     shadow_crushing_pct = round(float((np.sum(gray_img <= 5) / total_pixels) * 100.0), 2)
 
-    # 5. RGB Histogram (64 bins normalized % สำหรับแสดงกราฟสวยงามและน้ำหนักเบา)
+    # 5. RGB Histogram (64 bins normalized %)
     bins = 64
     hist_r = cv2.calcHist([roi_bgr], [2], None, [bins], [0, 256]).flatten()
     hist_g = cv2.calcHist([roi_bgr], [1], None, [bins], [0, 256]).flatten()
