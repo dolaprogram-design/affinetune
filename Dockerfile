@@ -1,18 +1,23 @@
 FROM python:3.9-slim
 
-# ติดตั้ง System dependencies สำหรับ OpenCV และ ExifTool[cite: 16]
-# เพิ่มคำสั่งลบแคช apt เพื่อลดขนาด Image
-RUN pip install -r requirements.txt && \
-pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless opencv-contrib-python-headless && \
-pip install --no-cache-dir opencv-python-headless
+# 1. ติดตั้งแพ็กเกจระบบ (ส่วน apt-get เดิมของคุณ)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. กำหนดโฟลเดอร์ทำงานก่อน
 WORKDIR /app
 
-# คัดลอกและติดตั้ง Python dependencies[cite: 16]
+# 3. คัดลอกไฟล์ requirements.txt เข้ามาก่อนสั่ง pip install
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# คัดลอกซอร์สโค้ดทั้งหมด[cite: 16]
+# 4. ติดตั้งไลบรารีและล้าง OpenCV ตัวที่ซ้ำซ้อน
+RUN pip install --no-cache-dir -r requirements.txt && \
+    (pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless opencv-contrib-python-headless || true) && \
+    pip install --no-cache-dir opencv-python-headless
+
+# 5. คัดลอกโค้ดทั้งหมดของโปรเจกต์เข้า Container
 COPY . .
 
-# เริ่มต้นเซิร์ฟเวอร์[cite: 16]
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
+# 6. คำสั่งรันแอป (คงไว้ตามเดิมของคุณ เช่น uvicorn)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
