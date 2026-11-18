@@ -2,12 +2,9 @@ FROM python:3.9-slim
 
 # ติดตั้ง System dependencies สำหรับ OpenCV และ ExifTool[cite: 16]
 # เพิ่มคำสั่งลบแคช apt เพื่อลดขนาด Image
-RUN apt-get update && apt-get install -y \
-    exiftool \
-    libgl1 \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-
+RUN pip install -r requirements.txt && \
+pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless opencv-contrib-python-headless && \
+pip install --no-cache-dir opencv-python-headless
 WORKDIR /app
 
 # คัดลอกและติดตั้ง Python dependencies[cite: 16]
